@@ -32,12 +32,12 @@ import {
 // --- Firebase Initialization ---
 
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+  apiKey: "AIzaSyCO3bou4eMc-b4npOT99knhwBn_AAt2Kjc",
+  authDomain: "monthly-planner-560a3.firebaseapp.com",
+  projectId: "monthly-planner-560a3",
+  storageBucket: "monthly-planner-560a3.firebasestorage.app",
+  messagingSenderId: "1022766430649",
+  appId: "1:1022766430649:web:f094b81940b863f0481e68"
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
