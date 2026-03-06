@@ -160,7 +160,18 @@ export default function App() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-screen font-sans font-bold">데이터 동기화 중...</div>;
+ if (loading) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen gap-4 font-bold">
+      <div className="animate-pulse">데이터 동기화 중...</div>
+      <div className="p-4 bg-slate-100 rounded-lg text-sm font-mono">
+        <p>1. 인증 상태: {user ? "✅ 로그인 완료 (UID: " + user.uid.substring(0,5) + "...)" : "⏳ 로그인 대기 중"}</p>
+        <p>2. 데이터 개수: {plans.length}개</p>
+      </div>
+      {!user && <p className="text-red-500 text-xs">Firebase Console에서 '익명 로그인'이 활성화되었는지 확인하세요.</p>}
+    </div>
+  );
+}
 
   const todayStr = new Date().toISOString().split('T')[0];
   const gridLayout = "grid-cols-[0.6fr_1.2fr_1.2fr_1.2fr_1.2fr_1.2fr_0.6fr]";
