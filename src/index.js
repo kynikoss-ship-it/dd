@@ -1,36 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import ReactDOM from 'react-dom/client';
 import { 
-  Calendar as CalendarIcon, 
-  ChevronLeft, 
-  ChevronRight, 
-  Plus, 
-  Trash2, 
-  CheckCircle, 
-  AlertCircle, 
-  Clock, 
-  X,
-  FileText
+  Calendar as CalendarIcon, ChevronLeft, ChevronRight, X 
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken, 
-  onAuthStateChanged 
+  getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  getFirestore, 
-  collection, 
-  onSnapshot, 
-  addDoc, 
-  deleteDoc, 
-  doc, 
-  serverTimestamp
+  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp 
 } from 'firebase/firestore';
 
-// --- Firebase Initialization ---
-// --- Firebase Initialization ---
-
+// --- Firebase 설정 (하드코딩 유지하여 연결 보장) ---
 const firebaseConfig = {
   apiKey: "AIzaSyCO3bou4eMc-b4npOT99knhwBn_AAt2Kjc",
   authDomain: "monthly-planner-560a3.firebaseapp.com",
@@ -39,10 +20,13 @@ const firebaseConfig = {
   messagingSenderId: "1022766430649",
   appId: "1:1022766430649:web:f094b81940b863f0481e68"
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'school-calendar-planner';
+
+// 컬렉션 이름을 단순화하여 데이터 유실 및 경로 에러 방지
+const COLLECTION_NAME = 'monthly_plans';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -56,46 +40,43 @@ export default function App() {
   const [description, setDescription] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // 1. 인증 로직 최적화
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth Error:", error);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        // 유저 정보 없으면 익명 로그인 시도
+        signInAnonymously(auth).catch(err => {
+          console.error("Auth Error:", err);
+          setLoading(false); // 에러 시 로딩 해제
+        });
       }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    });
     return () => unsubscribe();
   }, []);
 
+  // 2. 실시간 데이터 동기화 (경로 단순화)
   useEffect(() => {
     if (!user) return;
 
-    const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
-    const unsubscribe = onSnapshot(plansRef, 
-      (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        data.sort((a, b) => {
-          if (a.date === b.date) return b.createdAt - a.createdAt;
-          return a.date > b.date ? 1 : -1;
-        });
-        setPlans(data);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Firestore Error:", err);
-        setLoading(false);
-      }
-    );
+    const plansRef = collection(db, COLLECTION_NAME);
+    const unsubscribe = onSnapshot(plansRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // 날짜순 정렬
+      data.sort((a, b) => a.date > b.date ? 1 : -1);
+      
+      setPlans(data);
+      setLoading(false); // 데이터 수신 완료 시 로딩 해제
+    }, (err) => {
+      console.error("Firestore Error:", err);
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, [user]);
 
+  // 알림 메시지 자동 삭제
   useEffect(() => {
     if (message.text) {
       const timer = setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -103,6 +84,7 @@ export default function App() {
     }
   }, [message]);
 
+  // 달력 계산 로직
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -110,12 +92,8 @@ export default function App() {
   
   const calendarDays = useMemo(() => {
     const days = [];
-    for (let i = 0; i < firstDayIndex; i++) {
-      days.push(null);
-    }
-    for (let i = 1; i <= daysInMonth; i++) {
-      days.push(i);
-    }
+    for (let i = 0; i < firstDayIndex; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(i);
     return days;
   }, [year, month, daysInMonth, firstDayIndex]);
 
@@ -132,15 +110,13 @@ export default function App() {
     if (!user || !title.trim()) return;
 
     try {
-      const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
-      await addDoc(plansRef, {
+      await addDoc(collection(db, COLLECTION_NAME), {
         date: selectedDate,
         title,
         description,
         createdAt: serverTimestamp(),
         userId: user.uid
       });
-
       setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
       setTitle('');
       setDescription('');
@@ -153,25 +129,21 @@ export default function App() {
   const handleDelete = async (e, id) => {
     e.stopPropagation();
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', id));
+      await deleteDoc(doc(db, COLLECTION_NAME, id));
       setMessage({ type: 'success', text: '삭제되었습니다.' });
     } catch (error) {
       setMessage({ type: 'error', text: '삭제 실패' });
     }
   };
 
- if (loading) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen gap-4 font-bold">
-      <div className="animate-pulse">데이터 동기화 중...</div>
-      <div className="p-4 bg-slate-100 rounded-lg text-sm font-mono">
-        <p>1. 인증 상태: {user ? "✅ 로그인 완료 (UID: " + user.uid.substring(0,5) + "...)" : "⏳ 로그인 대기 중"}</p>
-        <p>2. 데이터 개수: {plans.length}개</p>
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen font-sans font-bold gap-4">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="text-slate-500">학교 일정 데이터를 동기화하고 있습니다...</div>
       </div>
-      {!user && <p className="text-red-500 text-xs">Firebase Console에서 '익명 로그인'이 활성화되었는지 확인하세요.</p>}
-    </div>
-  );
-}
+    );
+  }
 
   const todayStr = new Date().toISOString().split('T')[0];
   const gridLayout = "grid-cols-[0.6fr_1.2fr_1.2fr_1.2fr_1.2fr_1.2fr_0.6fr]";
@@ -179,7 +151,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-white p-2 md:p-4 text-slate-900 font-sans">
       <div className="max-w-full mx-auto space-y-4">
-        
         <header className="flex items-center justify-between mb-2 px-1">
           <div className="flex items-center gap-6">
              <div className="flex items-center bg-slate-100 rounded-xl p-1.5 border border-slate-300 shadow-sm">
@@ -195,7 +166,7 @@ export default function App() {
         </header>
 
         {message.text && (
-          <div className={`fixed top-8 right-8 z-[200] p-5 rounded-2xl flex items-center gap-4 shadow-2xl animate-in fade-in slide-in-from-top-6 ${message.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+          <div className={`fixed top-8 right-8 z-[200] p-5 rounded-2xl flex items-center gap-4 shadow-2xl ${message.type === 'success' ? 'bg-green-600' : 'bg-red-600'} text-white`}>
             <span className="font-black text-lg">{message.text}</span>
           </div>
         )}
@@ -246,7 +217,6 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <div className="absolute inset-0 border-[3px] border-transparent group-hover:border-blue-400/50 pointer-events-none transition-colors"></div>
                 </div>
               );
             })}
@@ -289,19 +259,8 @@ export default function App() {
                   ></textarea>
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <button 
-                    type="button" 
-                    onClick={() => setIsModalOpen(false)} 
-                    className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-lg"
-                  >
-                    취소
-                  </button>
-                  <button 
-                    type="submit" 
-                    className="flex-[2] py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-lg shadow-xl shadow-blue-100"
-                  >
-                    저장하기
-                  </button>
+                  <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-lg">취소</button>
+                  <button type="submit" className="flex-[2] py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-lg shadow-xl shadow-blue-100">저장하기</button>
                 </div>
               </form>
             </div>
@@ -311,7 +270,6 @@ export default function App() {
     </div>
   );
 }
-import ReactDOM from 'react-dom/client';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
