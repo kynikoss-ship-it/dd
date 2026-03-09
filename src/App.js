@@ -1,32 +1,31 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import ReactDOM from 'react-dom/client';
 import { 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, X 
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, signInAnonymously, onAuthStateChanged 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp 
+  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query
 } from 'firebase/firestore';
 
-// --- Firebase 설정 (하드코딩 유지하여 연결 보장) ---
-const firebaseConfig = {
-  apiKey: "AIzaSyCO3bou4eMc-b4npOT99knhwBn_AAt2Kjc",
-  authDomain: "monthly-planner-560a3.firebaseapp.com",
-  projectId: "monthly-planner-560a3",
-  storageBucket: "monthly-planner-560a3.firebasestorage.app",
-  messagingSenderId: "1022766430649",
-  appId: "1:1022766430649:web:f094b81940b863f0481e68"
-};
-
+// --- 환경 변수 및 설정 ---
+const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'monthly-planner-560a3';
 
-// 컬렉션 이름을 단순화하여 데이터 유실 및 경로 에러 방지
-const COLLECTION_NAME = 'monthly_plans';
+// 한국 시간 기준 YYYY-MM-DD 문자열 생성 함수
+const getKSTDateString = (date = new Date()) => {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'Asia/Seoul'
+  }).format(date).replace(/\. /g, '-').replace(/\./g, '');
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -35,39 +34,42 @@ export default function App() {
   const [message, setMessage] = useState({ type: '', text: '' });
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getKSTDateString());
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // 1. 인증 로직 최적화
+  // 1. 인증 로직 (시스템 규칙 준수)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-      } else {
-        // 유저 정보 없으면 익명 로그인 시도
-        signInAnonymously(auth).catch(err => {
-          console.error("Auth Error:", err);
-          setLoading(false); // 에러 시 로딩 해제
-        });
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error:", err);
       }
-    });
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
 
-  // 2. 실시간 데이터 동기화 (경로 단순화)
+  // 2. 실시간 데이터 동기화 (표준 경로 사용)
   useEffect(() => {
     if (!user) return;
 
-    const plansRef = collection(db, COLLECTION_NAME);
+    // 규칙 1에 따른 데이터 경로 설정
+    const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
+    
     const unsubscribe = onSnapshot(plansRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // 날짜순 정렬
-      data.sort((a, b) => a.date > b.date ? 1 : -1);
-      
+      // 클라이언트 측 정렬 (규칙 2 준수)
+      data.sort((a, b) => (a.date > b.date ? 1 : -1));
       setPlans(data);
-      setLoading(false); // 데이터 수신 완료 시 로딩 해제
+      setLoading(false);
     }, (err) => {
       console.error("Firestore Error:", err);
       setLoading(false);
@@ -110,7 +112,8 @@ export default function App() {
     if (!user || !title.trim()) return;
 
     try {
-      await addDoc(collection(db, COLLECTION_NAME), {
+      const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
+      await addDoc(plansRef, {
         date: selectedDate,
         title,
         description,
@@ -129,7 +132,8 @@ export default function App() {
   const handleDelete = async (e, id) => {
     e.stopPropagation();
     try {
-      await deleteDoc(doc(db, COLLECTION_NAME, id));
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', id);
+      await deleteDoc(docRef);
       setMessage({ type: 'success', text: '삭제되었습니다.' });
     } catch (error) {
       setMessage({ type: 'error', text: '삭제 실패' });
@@ -140,47 +144,48 @@ export default function App() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen font-sans font-bold gap-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <div className="text-slate-500">학교 일정 데이터를 동기화하고 있습니다...</div>
+        <div className="text-slate-500 text-lg">교무실 학사 일정을 동기화 중입니다...</div>
       </div>
     );
   }
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  // 오늘 날짜 계산 (KST 기준)
+  const todayStr = getKSTDateString();
   const gridLayout = "grid-cols-[0.6fr_1.2fr_1.2fr_1.2fr_1.2fr_1.2fr_0.6fr]";
 
   return (
-    <div className="min-h-screen bg-white p-2 md:p-4 text-slate-900 font-sans">
+    <div className="min-h-screen bg-white p-2 md:p-4 text-slate-900 font-sans selection:bg-blue-100">
       <div className="max-w-full mx-auto space-y-4">
-        <header className="flex items-center justify-between mb-2 px-1">
+        <header className="flex items-center justify-between mb-4 px-1">
           <div className="flex items-center gap-6">
              <div className="flex items-center bg-slate-100 rounded-xl p-1.5 border border-slate-300 shadow-sm">
-                <button onClick={prevMonth} className="p-2 hover:bg-white rounded-lg transition-all"><ChevronLeft size={24}/></button>
+                <button onClick={prevMonth} className="p-2 hover:bg-white rounded-lg transition-all active:scale-95"><ChevronLeft size={24}/></button>
                 <span className="px-6 font-black min-w-[180px] text-center text-2xl tracking-tighter">{year}년 {month + 1}월</span>
-                <button onClick={nextMonth} className="p-2 hover:bg-white rounded-lg transition-all"><ChevronRight size={24}/></button>
+                <button onClick={nextMonth} className="p-2 hover:bg-white rounded-lg transition-all active:scale-95"><ChevronRight size={24}/></button>
               </div>
-              <h1 className="hidden lg:block text-3xl font-black text-slate-900 tracking-tighter">월중 행사표</h1>
+              <h1 className="hidden lg:block text-3xl font-black text-slate-900 tracking-tighter">School Academic Calendar</h1>
           </div>
-          <div className="text-sm font-bold bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500">
-            날짜 클릭 시 일정 추가
+          <div className="text-sm font-bold bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 text-blue-600 shadow-sm">
+            💡 날짜를 클릭하여 주요 학사 일정을 입력하세요
           </div>
         </header>
 
         {message.text && (
-          <div className={`fixed top-8 right-8 z-[200] p-5 rounded-2xl flex items-center gap-4 shadow-2xl ${message.type === 'success' ? 'bg-green-600' : 'bg-red-600'} text-white`}>
+          <div className={`fixed top-8 right-8 z-[200] p-5 rounded-2xl flex items-center gap-4 shadow-2xl animate-bounce ${message.type === 'success' ? 'bg-slate-900' : 'bg-red-600'} text-white`}>
             <span className="font-black text-lg">{message.text}</span>
           </div>
         )}
 
-        <div className="w-full bg-slate-900 p-[1.5px] shadow-lg rounded-sm overflow-x-auto">
-          <div className={`grid ${gridLayout} min-w-[1100px]`}>
+        <div className="w-full bg-slate-900 p-[2px] shadow-2xl rounded-lg overflow-x-auto border-2 border-slate-900">
+          <div className={`grid ${gridLayout} min-w-[1200px]`}>
             {['일', '월', '화', '수', '목', '금', '토'].map((d, idx) => (
-              <div key={d} className={`py-3 text-center text-lg font-black border-r border-slate-900 last:border-r-0 bg-[#FEFF9C] ${idx === 0 ? 'text-red-600' : idx === 6 ? 'text-blue-600' : 'text-slate-900'}`}>
+              <div key={d} className={`py-4 text-center text-xl font-black border-r border-slate-900 last:border-r-0 bg-[#FEFF9C] ${idx === 0 ? 'text-red-600' : idx === 6 ? 'text-blue-600' : 'text-slate-900'}`}>
                 {d}
               </div>
             ))}
 
             {calendarDays.map((day, idx) => {
-              if (day === null) return <div key={`empty-${idx}`} className="bg-slate-50 border-r border-t border-slate-900 h-[160px]"></div>;
+              if (day === null) return <div key={`empty-${idx}`} className="bg-slate-50 border-r border-t border-slate-900 h-[180px]"></div>;
               
               const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const dayPlans = plans.filter(p => p.date === dateStr);
@@ -192,27 +197,27 @@ export default function App() {
                 <div 
                   key={day} 
                   onClick={() => handleDateClick(dateStr)}
-                  className={`min-h-[160px] p-2 border-r border-t border-slate-900 group cursor-pointer transition-colors relative
-                    ${isSunday ? 'bg-[#FFF2F2]' : isSaturday ? 'bg-[#F2F9FF]' : 'bg-white hover:bg-slate-50'}
+                  className={`min-h-[180px] p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative
+                    ${isSunday ? 'bg-[#FFF2F2]' : isSaturday ? 'bg-[#F2F9FF]' : 'bg-white hover:bg-blue-50/30'}
                   `}
                 >
-                  <div className="flex justify-between items-start mb-2">
-                    <span className={`text-xl font-black ${isToday ? 'bg-blue-600 text-white w-9 h-9 flex items-center justify-center rounded-full shadow-md' : isSunday ? 'text-red-600' : isSaturday ? 'text-blue-600' : 'text-slate-900'}`}>
+                  <div className="flex justify-between items-start mb-3">
+                    <span className={`text-2xl font-black ${isToday ? 'bg-blue-600 text-white w-10 h-10 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-100' : isSunday ? 'text-red-600' : isSaturday ? 'text-blue-600' : 'text-slate-900'}`}>
                       {day}
                     </span>
                   </div>
                   
-                  <div className="space-y-1 mt-1">
+                  <div className="space-y-2 mt-2">
                     {dayPlans.map(p => (
-                      <div key={p.id} className="group/item flex items-start justify-between gap-1 text-[16px] leading-[1.3] py-1 px-1.5 rounded hover:bg-black/5 transition-colors">
-                        <span className={`font-bold break-all tracking-tight ${isSunday ? 'text-red-700' : 'text-slate-900'}`}>
+                      <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-2 rounded-lg bg-white/50 border border-transparent hover:border-slate-200 hover:shadow-sm transition-all">
+                        <span className={`text-xl font-black break-all tracking-tight leading-tight ${isSunday ? 'text-red-700' : 'text-slate-900'}`}>
                           {p.title}
                         </span>
                         <button 
                           onClick={(e) => handleDelete(e, p.id)} 
-                          className="opacity-0 group-hover/item:opacity-100 text-slate-400 hover:text-red-600 shrink-0 p-0.5"
+                          className="opacity-0 group-hover/item:opacity-100 text-slate-300 hover:text-red-600 shrink-0 p-1 bg-white rounded-md shadow-sm border border-slate-100 transition-opacity"
                         >
-                          <X size={16} />
+                          <X size={18} />
                         </button>
                       </div>
                     ))}
@@ -224,43 +229,45 @@ export default function App() {
         </div>
 
         {isModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
-              <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                  <CalendarIcon size={24} className="text-blue-600" />
-                  {selectedDate} 일정 추가
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+            <div className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h3 className="text-2xl font-black text-slate-800 flex items-center gap-3">
+                  <div className="bg-blue-600 p-2 rounded-xl text-white">
+                    <CalendarIcon size={24} />
+                  </div>
+                  {selectedDate} 일정 등록
                 </h3>
-                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-white rounded-full text-slate-400 border border-slate-200">
-                  <X size={24} />
+                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors">
+                  <X size={28} />
                 </button>
               </div>
-              <form onSubmit={handleAddPlan} className="p-6 space-y-6">
+              <form onSubmit={handleAddPlan} className="p-8 space-y-8">
                 <div>
-                  <label className="text-sm font-black text-slate-500 uppercase mb-2 block tracking-tight">일정 내용</label>
+                  <label className="text-xs font-black text-slate-400 uppercase mb-3 block tracking-widest">Event Title</label>
                   <input 
                     type="text" 
-                    placeholder="예: 기말고사, 개교기념일 등"
+                    placeholder="예: 1학기 중간고사, 현장체험학습"
                     value={title}
                     autoFocus
                     onChange={(e) => setTitle(e.target.value)}
-                    className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 outline-none font-black text-xl text-slate-900 transition-all"
+                    className="w-full p-5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-black text-2xl text-slate-900 transition-all placeholder:text-slate-300"
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-black text-slate-500 uppercase mb-2 block tracking-tight">세부 내용 (선택)</label>
+                  <label className="text-xs font-black text-slate-400 uppercase mb-3 block tracking-widest">Details (Optional)</label>
                   <textarea 
                     rows="3"
-                    placeholder="추가 설명이 필요한 경우 입력"
+                    placeholder="준비물 또는 세부 장소 등"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 outline-none font-bold text-lg resize-none"
+                    className="w-full p-5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-xl resize-none transition-all placeholder:text-slate-300"
                   ></textarea>
                 </div>
-                <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-lg">취소</button>
-                  <button type="submit" className="flex-[2] py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-lg shadow-xl shadow-blue-100">저장하기</button>
+                <div className="flex gap-4 pt-4">
+                  <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-xl transition-colors">취소</button>
+                  <button type="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">일정 저장하기</button>
                 </div>
               </form>
             </div>
@@ -270,6 +277,3 @@ export default function App() {
     </div>
   );
 }
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
