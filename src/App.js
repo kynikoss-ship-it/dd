@@ -166,6 +166,20 @@ export default function App() {
     return days;
   }, [year, month, daysInMonth, firstDayIndex]);
 
+  // 평일(월~금) 중 유효한 날짜가 포함된 주(week)만 필터링
+  const validWeeks = useMemo(() => {
+    const weeks = [];
+    for (let i = 0; i < calendarDays.length; i += 7) {
+      const week = calendarDays.slice(i, i + 7);
+      // 인덱스 1(월요일)부터 5(금요일)까지 확인하여 모두 null이면 제외
+      const hasWeekday = week.slice(1, 6).some(day => day !== null);
+      if (hasWeekday) {
+        weeks.push(week);
+      }
+    }
+    return weeks;
+  }, [calendarDays]);
+
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
 
@@ -211,136 +225,139 @@ export default function App() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen font-sans font-bold gap-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <div className="text-slate-500 text-lg">데이터 연결 중입니다...</div>
+        <div className="text-slate-500 text-2xl">데이터 연결 중입니다...</div>
       </div>
     );
   }
 
   const todayStr = getKSTDateString();
   const gridLayout = "grid-cols-5";
-  const weeksCount = calendarDays.length / 7;
+  const weeksCount = validWeeks.length;
 
   return (
-    <div className="h-screen w-screen bg-slate-100 p-2 text-slate-900 font-sans selection:bg-blue-100 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-slate-100 p-4 text-slate-900 font-sans selection:bg-blue-100 flex flex-col overflow-hidden">
       
       <style>{`
-        .cell-scroll::-webkit-scrollbar { width: 6px; }
+        .cell-scroll::-webkit-scrollbar { width: 8px; }
         .cell-scroll::-webkit-scrollbar-track { background: transparent; }
         .cell-scroll::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.15); border-radius: 10px; }
       `}</style>
 
       {message.text && (
-        <div className={`fixed top-8 right-8 z-[200] p-6 rounded-2xl flex items-center gap-4 shadow-2xl animate-bounce ${message.type === 'success' ? 'bg-slate-900' : 'bg-red-600'} text-white`}>
-          <span className="font-black text-2xl">{message.text}</span>
+        <div className={`fixed top-8 right-8 z-[200] p-8 rounded-2xl flex items-center gap-4 shadow-2xl animate-bounce ${message.type === 'success' ? 'bg-slate-900' : 'bg-red-600'} text-white`}>
+          <span className="font-black text-3xl">{message.text}</span>
         </div>
       )}
 
       {/* 달력 본문: 전체 화면 높이를 모두 차지하도록 설정 */}
-      <div className="flex-1 w-full h-full bg-slate-900 p-[2px] shadow-2xl rounded-xl overflow-hidden border-2 border-slate-900 flex flex-col relative">
+      <div className="flex-1 w-full h-full bg-slate-900 p-[3px] shadow-2xl rounded-xl overflow-hidden border-2 border-slate-900 flex flex-col relative">
         <div 
           className={`grid ${gridLayout} w-full h-full`}
           style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
         >
+          {/* 1440p 기준 요일 헤더 크기 확대 */}
           {['월', '화', '수', '목', '금'].map((d) => (
-            <div key={d} className="py-4 text-center text-3xl font-black border-r border-b border-slate-900 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
+            <div key={d} className="py-6 text-center text-4xl font-black border-r border-b border-slate-900 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
               {d}
             </div>
           ))}
 
-          {calendarDays.map((day, idx) => {
-            if (idx % 7 === 0 || idx % 7 === 6) return null; // 일요일(0), 토요일(6) 렌더링 제외
+          {validWeeks.flatMap((week, weekIdx) => {
+            return week.map((day, idx) => {
+              if (idx === 0 || idx === 6) return null; // 일요일(0), 토요일(6) 렌더링 제외
 
-            if (day === null) {
-              return <div key={`empty-${idx}`} className={`border-r border-t border-slate-900 bg-slate-200`}></div>;
-            }
-            
-            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const dayPlans = plans.filter(p => p.date === dateStr);
-            const isToday = todayStr === dateStr;
+              if (day === null) {
+                return <div key={`empty-${weekIdx}-${idx}`} className={`border-r border-t border-slate-900 bg-slate-200`}></div>;
+              }
+              
+              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const dayPlans = plans.filter(p => p.date === dateStr);
+              const isToday = todayStr === dateStr;
 
-            return (
-              <div 
-                key={day} 
-                onClick={() => handleDateClick(dateStr)}
-                className="p-2 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
-              >
-                <div className="flex justify-between items-start mb-1 shrink-0">
-                  {/* 날짜 숫자 크기 조정 (text-4xl -> text-2xl, w-14 -> w-10) */}
-                  <span className={`text-2xl font-black ${isToday ? 'bg-blue-700 text-white w-10 h-10 flex items-center justify-center rounded-full shadow-lg ring-2 ring-blue-200' : 'text-slate-900'}`}>
-                    {day}
-                  </span>
+              return (
+                <div 
+                  key={day} 
+                  onClick={() => handleDateClick(dateStr)}
+                  className="p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
+                >
+                  <div className="flex justify-between items-start mb-2 shrink-0">
+                    {/* 1440p 기준 날짜 숫자 크기 확대 */}
+                    <span className={`text-3xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : 'text-slate-900'}`}>
+                      {day}
+                    </span>
+                  </div>
+                  
+                  <div className="flex-1 space-y-2 mt-0 overflow-y-auto cell-scroll auto-scroll-container pr-2 pb-2">
+                    {dayPlans.map(p => (
+                      <div key={p.id} className="group/item flex items-center justify-between gap-3 py-1.5 px-3 rounded-xl bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
+                        {/* 1440p 기준 일정 텍스트 크기 확대 */}
+                        <span className="text-3xl font-black break-all tracking-tight leading-tight text-slate-900">
+                          {p.title}
+                        </span>
+                        <button 
+                          onClick={(e) => handleDelete(e, p.id)} 
+                          className="opacity-0 group-hover/item:opacity-100 text-slate-500 hover:text-red-600 shrink-0 p-1 bg-white rounded-md shadow-sm border border-slate-300 transition-opacity"
+                        >
+                          <X size={24} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                
-                {/* 간격 및 여백 축소 (space-y-2 -> space-y-1, mt-1 -> mt-0) */}
-                <div className="flex-1 space-y-1 mt-0 overflow-y-auto cell-scroll auto-scroll-container pr-1 pb-1">
-                  {dayPlans.map(p => (
-                    <div key={p.id} className="group/item flex items-center justify-between gap-2 py-0.5 px-2 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
-                      {/* 텍스트 크기 조정 (text-3xl -> text-2xl) */}
-                      <span className="text-2xl font-black break-all tracking-tight leading-tight text-slate-900">
-                        {p.title}
-                      </span>
-                      <button 
-                        onClick={(e) => handleDelete(e, p.id)} 
-                        className="opacity-0 group-hover/item:opacity-100 text-slate-500 hover:text-red-600 shrink-0 p-0.5 bg-white rounded-md shadow-sm border border-slate-300 transition-opacity"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
+              );
+            });
           })}
         </div>
 
-        {/* 연/월 조작 플로팅 컨트롤러 (우측 하단) */}
-        <div className="absolute bottom-6 right-6 z-40 flex items-center bg-slate-900 text-white rounded-2xl p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)] border border-slate-600/50 backdrop-blur-md">
-          <button onClick={prevMonth} className="p-3 hover:bg-slate-800 rounded-xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronLeft size={40}/></button>
-          <span className="px-6 font-black min-w-[240px] text-center text-4xl tracking-tighter">{year}년 {month + 1}월</span>
-          <button onClick={nextMonth} className="p-3 hover:bg-slate-800 rounded-xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronRight size={40}/></button>
+        {/* 1440p 기준 연/월 조작 플로팅 컨트롤러 크기 확대 */}
+        <div className="absolute bottom-8 right-8 z-40 flex items-center bg-slate-900 text-white rounded-3xl p-3 shadow-[0_10px_40px_rgba(0,0,0,0.5)] border border-slate-600/50 backdrop-blur-md">
+          <button onClick={prevMonth} className="p-4 hover:bg-slate-800 rounded-2xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronLeft size={48}/></button>
+          <span className="px-8 font-black min-w-[300px] text-center text-5xl tracking-tighter">{year}년 {month + 1}월</span>
+          <button onClick={nextMonth} className="p-4 hover:bg-slate-800 rounded-2xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronRight size={48}/></button>
         </div>
       </div>
 
+      {/* 1440p 기준 모달창 크기 확대 */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-          <div className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h3 className="text-4xl font-black text-slate-800 flex items-center gap-3">
-                <div className="bg-blue-600 p-3 rounded-xl text-white">
-                  <CalendarIcon size={32} />
+          <div className="bg-white w-full max-w-3xl rounded-[40px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+            <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-5xl font-black text-slate-800 flex items-center gap-4">
+                <div className="bg-blue-600 p-4 rounded-2xl text-white">
+                  <CalendarIcon size={40} />
                 </div>
                 {selectedDate} 일정 등록
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
-                <X size={36} />
+              <button onClick={() => setIsModalOpen(false)} className="p-4 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+                <X size={48} />
               </button>
             </div>
-            <form onSubmit={handleAddPlan} className="p-10 space-y-8">
+            <form onSubmit={handleAddPlan} className="p-12 space-y-10">
               <div>
-                <label className="text-lg font-black text-slate-500 uppercase mb-4 block tracking-widest">일정명</label>
+                <label className="text-2xl font-black text-slate-500 uppercase mb-5 block tracking-widest">일정명</label>
                 <input 
                   type="text" 
                   placeholder="예: 기말고사 시작"
                   value={title}
                   autoFocus
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-black text-4xl text-slate-900 transition-all placeholder:text-slate-300"
+                  className="w-full p-8 bg-slate-50 border-2 border-slate-200 rounded-3xl focus:border-blue-500 focus:bg-white outline-none font-black text-5xl text-slate-900 transition-all placeholder:text-slate-300"
                   required
                 />
               </div>
               <div>
-                <label className="text-lg font-black text-slate-500 uppercase mb-4 block tracking-widest">세부 사항</label>
+                <label className="text-2xl font-black text-slate-500 uppercase mb-5 block tracking-widest">세부 사항</label>
                 <textarea 
                   rows="3"
                   placeholder="추가 메모"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-3xl resize-none transition-all placeholder:text-slate-300"
+                  className="w-full p-8 bg-slate-50 border-2 border-slate-200 rounded-3xl focus:border-blue-500 focus:bg-white outline-none font-bold text-4xl resize-none transition-all placeholder:text-slate-300"
                 ></textarea>
               </div>
-              <div className="flex gap-4 pt-6">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-6 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-3xl transition-colors">취소</button>
-                <button type="submit" className="flex-[2] py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-3xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">저장하기</button>
+              <div className="flex gap-6 pt-8">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-8 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-3xl font-black text-4xl transition-colors">취소</button>
+                <button type="submit" className="flex-[2] py-8 bg-blue-600 hover:bg-blue-700 text-white rounded-3xl font-black text-4xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">저장하기</button>
               </div>
             </form>
           </div>
