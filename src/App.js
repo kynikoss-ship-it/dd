@@ -262,25 +262,28 @@ export default function App() {
               <div 
                 key={day} 
                 onClick={() => handleDateClick(dateStr)}
-                className="p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
+                className="p-2 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
               >
-                <div className="flex justify-between items-start mb-2 shrink-0">
-                  <span className={`text-4xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : 'text-slate-900'}`}>
+                <div className="flex justify-between items-start mb-1 shrink-0">
+                  {/* 날짜 숫자 크기 조정 (text-4xl -> text-2xl, w-14 -> w-10) */}
+                  <span className={`text-2xl font-black ${isToday ? 'bg-blue-700 text-white w-10 h-10 flex items-center justify-center rounded-full shadow-lg ring-2 ring-blue-200' : 'text-slate-900'}`}>
                     {day}
                   </span>
                 </div>
                 
-                <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll auto-scroll-container pr-1 pb-4">
+                {/* 간격 및 여백 축소 (space-y-2 -> space-y-1, mt-1 -> mt-0) */}
+                <div className="flex-1 space-y-1 mt-0 overflow-y-auto cell-scroll auto-scroll-container pr-1 pb-1">
                   {dayPlans.map(p => (
-                    <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-3 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
-                      <span className="text-3xl font-black break-all tracking-tight leading-tight text-slate-900">
+                    <div key={p.id} className="group/item flex items-center justify-between gap-2 py-0.5 px-2 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
+                      {/* 텍스트 크기 조정 (text-3xl -> text-2xl) */}
+                      <span className="text-2xl font-black break-all tracking-tight leading-tight text-slate-900">
                         {p.title}
                       </span>
                       <button 
                         onClick={(e) => handleDelete(e, p.id)} 
-                        className="opacity-0 group-hover/item:opacity-100 text-slate-500 hover:text-red-600 shrink-0 p-1 bg-white rounded-md shadow-sm border border-slate-300 transition-opacity"
+                        className="opacity-0 group-hover/item:opacity-100 text-slate-500 hover:text-red-600 shrink-0 p-0.5 bg-white rounded-md shadow-sm border border-slate-300 transition-opacity"
                       >
-                        <X size={20} />
+                        <X size={18} />
                       </button>
                     </div>
                   ))}
