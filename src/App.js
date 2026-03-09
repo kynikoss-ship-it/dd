@@ -95,6 +95,65 @@ export default function App() {
     }
   }, [message]);
 
+  // --- 자동 스크롤 로직 ---
+  useEffect(() => {
+    let animationFrameId;
+    const scrollSpeed = 0.5; // 프레임당 이동 픽셀 (속도 조절)
+
+    const scrollLoop = () => {
+      const containers = document.querySelectorAll('.auto-scroll-container');
+      const now = Date.now();
+      
+      containers.forEach(container => {
+        // 이벤트 리스너 및 초기 상태 할당
+        if (!container.dataset.initialized) {
+          container.addEventListener('mouseenter', () => container.dataset.isHovered = 'true');
+          container.addEventListener('mouseleave', () => container.dataset.isHovered = 'false');
+          container.dataset.direction = '1';
+          container.dataset.exactScroll = '0';
+          container.dataset.initialized = 'true';
+        }
+
+        // 마우스 호버 시 수동 스크롤 위치를 동기화하고 자동 스크롤 정지
+        if (container.dataset.isHovered === 'true') {
+          container.dataset.exactScroll = container.scrollTop;
+          return;
+        }
+        
+        // 스크롤이 불필요한 경우 초기화
+        if (container.scrollHeight <= container.clientHeight) {
+          container.scrollTop = 0;
+          return;
+        }
+        
+        // 양 끝단 도달 시 설정된 대기 시간 확인
+        const pauseUntil = parseInt(container.dataset.pauseUntil || '0', 10);
+        if (now < pauseUntil) return;
+
+        let dir = parseFloat(container.dataset.direction);
+        let exactScroll = parseFloat(container.dataset.exactScroll);
+        
+        exactScroll += dir * scrollSpeed;
+        container.dataset.exactScroll = exactScroll;
+        container.scrollTop = exactScroll;
+
+        // 경계선 도달 시 방향 전환 및 2초 대기
+        if (dir === 1 && container.scrollTop >= container.scrollHeight - container.clientHeight - 1) {
+          container.dataset.direction = '-1';
+          container.dataset.pauseUntil = (now + 2000).toString();
+        } else if (dir === -1 && container.scrollTop <= 0) {
+          container.dataset.direction = '1';
+          container.dataset.pauseUntil = (now + 2000).toString();
+        }
+      });
+      animationFrameId = requestAnimationFrame(scrollLoop);
+    };
+
+    animationFrameId = requestAnimationFrame(scrollLoop);
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
+
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -221,7 +280,8 @@ export default function App() {
                   </span>
                 </div>
                 
-                <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll pr-1 pb-4">
+                {/* auto-scroll-container 클래스 추가를 통해 스크립트가 해당 요소를 인지하도록 구성 */}
+                <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll auto-scroll-container pr-1 pb-4">
                   {dayPlans.map(p => (
                     <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-3 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
                       <span className={`text-3xl font-black break-all tracking-tight leading-tight ${isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
