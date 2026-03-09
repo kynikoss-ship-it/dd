@@ -105,7 +105,6 @@ export default function App() {
     for (let i = 0; i < firstDayIndex; i++) days.push(null);
     for (let i = 1; i <= daysInMonth; i++) days.push(i);
     
-    // 달력의 마지막 주 빈 칸 채우기 (항상 7의 배수가 되도록 조정)
     const remainder = days.length % 7;
     if (remainder !== 0) {
       for (let i = 0; i < 7 - remainder; i++) days.push(null);
@@ -165,157 +164,136 @@ export default function App() {
   }
 
   const todayStr = getKSTDateString();
-  
-  // 주말 너비를 줄이고 평일 너비를 확대 (0.8fr / 1.3fr)
   const gridLayout = "grid-cols-[0.8fr_1.3fr_1.3fr_1.3fr_1.3fr_1.3fr_0.8fr]";
-  
-  // 주차(Weeks) 계산을 통한 동적 그리드 행 높이 설정
   const weeksCount = calendarDays.length / 7;
 
   return (
-    // 전체화면에 최적화: h-screen, w-screen 적용 및 스크롤 숨김
-    <div className="h-screen w-screen bg-white p-4 text-slate-900 font-sans selection:bg-blue-100 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-slate-100 p-2 text-slate-900 font-sans selection:bg-blue-100 flex flex-col overflow-hidden">
       
-      {/* 커스텀 스크롤바 스타일 주입 (셀 내부에 일정 많을 때 대비) */}
       <style>{`
         .cell-scroll::-webkit-scrollbar { width: 6px; }
         .cell-scroll::-webkit-scrollbar-track { background: transparent; }
         .cell-scroll::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.15); border-radius: 10px; }
       `}</style>
 
-      <div className="w-full h-full max-w-[1920px] mx-auto flex flex-col space-y-4">
-        {/* 헤더 영역: 고정 높이 차지 (shrink-0) */}
-        <header className="flex shrink-0 items-center justify-between px-2">
-          <div className="flex items-center gap-6">
-             <div className="flex items-center bg-slate-100 rounded-xl p-2 border border-slate-300 shadow-sm">
-                <button onClick={prevMonth} className="p-2 hover:bg-white rounded-lg transition-all active:scale-95"><ChevronLeft size={36}/></button>
-                <span className="px-6 font-black min-w-[220px] text-center text-4xl tracking-tighter">{year}년 {month + 1}월</span>
-                <button onClick={nextMonth} className="p-2 hover:bg-white rounded-lg transition-all active:scale-95"><ChevronRight size={36}/></button>
-              </div>
-              <h1 className="hidden lg:block text-5xl font-black text-slate-900 tracking-tighter">월중행사계획표</h1>
-          </div>
-          <div className="text-2xl font-bold bg-blue-50 px-6 py-4 rounded-xl border border-blue-100 text-blue-700 shadow-sm">
-            💡 날짜를 클릭하여 주요 일정을 입력하세요
-          </div>
-        </header>
+      {message.text && (
+        <div className={`fixed top-8 right-8 z-[200] p-6 rounded-2xl flex items-center gap-4 shadow-2xl animate-bounce ${message.type === 'success' ? 'bg-slate-900' : 'bg-red-600'} text-white`}>
+          <span className="font-black text-2xl">{message.text}</span>
+        </div>
+      )}
 
-        {message.text && (
-          <div className={`fixed top-8 right-8 z-[200] p-6 rounded-2xl flex items-center gap-4 shadow-2xl animate-bounce ${message.type === 'success' ? 'bg-slate-900' : 'bg-red-600'} text-white`}>
-            <span className="font-black text-2xl">{message.text}</span>
-          </div>
-        )}
+      {/* 달력 본문: 전체 화면 높이를 모두 차지하도록 설정 */}
+      <div className="flex-1 w-full h-full bg-slate-900 p-[2px] shadow-2xl rounded-xl overflow-hidden border-2 border-slate-900 flex flex-col relative">
+        <div 
+          className={`grid ${gridLayout} w-full h-full`}
+          style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
+        >
+          {['일', '월', '화', '수', '목', '금', '토'].map((d, idx) => (
+            <div key={d} className={`py-4 text-center text-3xl font-black border-r border-b border-slate-900 last:border-r-0 flex items-center justify-center
+              ${idx === 0 ? 'bg-red-200 text-red-900' : idx === 6 ? 'bg-blue-200 text-blue-900' : 'bg-yellow-500 text-slate-900'}`}>
+              {d}
+            </div>
+          ))}
 
-        {/* 달력 본문 영역: 남은 공간 모두 차지 (flex-1) */}
-        <div className="flex-1 w-full bg-slate-900 p-[2px] shadow-2xl rounded-lg overflow-hidden border-2 border-slate-900 flex flex-col">
-          <div 
-            className={`grid ${gridLayout} w-full h-full`}
-            // 1행: 요일(auto), 나머지 행: 날짜 셀 (1fr 균등분할)
-            style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
-          >
-            {/* 요일 헤더 */}
-            {['일', '월', '화', '수', '목', '금', '토'].map((d, idx) => (
-              <div key={d} className={`py-4 text-center text-3xl font-black border-r border-slate-900 last:border-r-0 flex items-center justify-center
-                ${idx === 0 ? 'bg-red-200 text-red-900' : idx === 6 ? 'bg-blue-200 text-blue-900' : 'bg-yellow-500 text-slate-900'}`}>
-                {d}
-              </div>
-            ))}
+          {calendarDays.map((day, idx) => {
+            const isSunday = idx % 7 === 0;
+            const isSaturday = idx % 7 === 6;
 
-            {/* 날짜 셀 */}
-            {calendarDays.map((day, idx) => {
-              const isSunday = idx % 7 === 0;
-              const isSaturday = idx % 7 === 6;
+            if (day === null) {
+              return <div key={`empty-${idx}`} className={`border-r border-t border-slate-900 bg-slate-200`}></div>;
+            }
+            
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const dayPlans = plans.filter(p => p.date === dateStr);
+            const isToday = todayStr === dateStr;
 
-              if (day === null) {
-                return <div key={`empty-${idx}`} className={`border-r border-t border-slate-900 bg-slate-200`}></div>;
-              }
-              
-              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const dayPlans = plans.filter(p => p.date === dateStr);
-              const isToday = todayStr === dateStr;
-
-              return (
-                <div 
-                  key={day} 
-                  onClick={() => handleDateClick(dateStr)}
-                  // 높이를 제한하지 않고 flex-col 적용. 내용은 overflow 처리
-                  className={`p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden
-                    ${isSunday ? 'bg-red-200 hover:bg-red-300' : isSaturday ? 'bg-blue-200 hover:bg-blue-300' : 'bg-white hover:bg-slate-100'}
-                  `}
-                >
-                  <div className="flex justify-between items-start mb-2 shrink-0">
-                    <span className={`text-4xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
-                      {day}
-                    </span>
-                  </div>
-                  
-                  {/* 일정이 많을 경우 셀 내부에서만 스크롤 되도록 flex-1 및 overflow-y-auto 적용 */}
-                  <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll pr-1">
-                    {dayPlans.map(p => (
-                      <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-3 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
-                        <span className={`text-3xl font-black break-all tracking-tight leading-tight ${isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
-                          {p.title}
-                        </span>
-                        <button 
-                          onClick={(e) => handleDelete(e, p.id)} 
-                          className="opacity-0 group-hover/item:opacity-100 text-slate-500 hover:text-red-600 shrink-0 p-1 bg-white rounded-md shadow-sm border border-slate-300 transition-opacity"
-                        >
-                          <X size={20} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+            return (
+              <div 
+                key={day} 
+                onClick={() => handleDateClick(dateStr)}
+                className={`p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden
+                  ${isSunday ? 'bg-red-200 hover:bg-red-300' : isSaturday ? 'bg-blue-200 hover:bg-blue-300' : 'bg-white hover:bg-slate-100'}
+                `}
+              >
+                <div className="flex justify-between items-start mb-2 shrink-0">
+                  <span className={`text-4xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
+                    {day}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
+                
+                <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll pr-1 pb-4">
+                  {dayPlans.map(p => (
+                    <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-3 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
+                      <span className={`text-3xl font-black break-all tracking-tight leading-tight ${isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
+                        {p.title}
+                      </span>
+                      <button 
+                        onClick={(e) => handleDelete(e, p.id)} 
+                        className="opacity-0 group-hover/item:opacity-100 text-slate-500 hover:text-red-600 shrink-0 p-1 bg-white rounded-md shadow-sm border border-slate-300 transition-opacity"
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {isModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-            <div className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
-              <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="text-4xl font-black text-slate-800 flex items-center gap-3">
-                  <div className="bg-blue-600 p-3 rounded-xl text-white">
-                    <CalendarIcon size={32} />
-                  </div>
-                  {selectedDate} 일정 등록
-                </h3>
-                <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
-                  <X size={36} />
-                </button>
-              </div>
-              <form onSubmit={handleAddPlan} className="p-10 space-y-8">
-                <div>
-                  <label className="text-lg font-black text-slate-500 uppercase mb-4 block tracking-widest">일정명</label>
-                  <input 
-                    type="text" 
-                    placeholder="예: 기말고사 시작"
-                    value={title}
-                    autoFocus
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-black text-4xl text-slate-900 transition-all placeholder:text-slate-300"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-lg font-black text-slate-500 uppercase mb-4 block tracking-widest">세부 사항</label>
-                  <textarea 
-                    rows="3"
-                    placeholder="추가 메모"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-3xl resize-none transition-all placeholder:text-slate-300"
-                  ></textarea>
-                </div>
-                <div className="flex gap-4 pt-6">
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-6 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-3xl transition-colors">취소</button>
-                  <button type="submit" className="flex-[2] py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-3xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">저장하기</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+        {/* 연/월 조작 플로팅 컨트롤러 (우측 하단) */}
+        <div className="absolute bottom-6 right-6 z-40 flex items-center bg-slate-900 text-white rounded-2xl p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)] border border-slate-600/50 backdrop-blur-md">
+          <button onClick={prevMonth} className="p-3 hover:bg-slate-800 rounded-xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronLeft size={40}/></button>
+          <span className="px-6 font-black min-w-[240px] text-center text-4xl tracking-tighter">{year}년 {month + 1}월</span>
+          <button onClick={nextMonth} className="p-3 hover:bg-slate-800 rounded-xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronRight size={40}/></button>
+        </div>
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <div className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-4xl font-black text-slate-800 flex items-center gap-3">
+                <div className="bg-blue-600 p-3 rounded-xl text-white">
+                  <CalendarIcon size={32} />
+                </div>
+                {selectedDate} 일정 등록
+              </h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+                <X size={36} />
+              </button>
+            </div>
+            <form onSubmit={handleAddPlan} className="p-10 space-y-8">
+              <div>
+                <label className="text-lg font-black text-slate-500 uppercase mb-4 block tracking-widest">일정명</label>
+                <input 
+                  type="text" 
+                  placeholder="예: 기말고사 시작"
+                  value={title}
+                  autoFocus
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-black text-4xl text-slate-900 transition-all placeholder:text-slate-300"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-lg font-black text-slate-500 uppercase mb-4 block tracking-widest">세부 사항</label>
+                <textarea 
+                  rows="3"
+                  placeholder="추가 메모"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-3xl resize-none transition-all placeholder:text-slate-300"
+                ></textarea>
+              </div>
+              <div className="flex gap-4 pt-6">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-6 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-3xl transition-colors">취소</button>
+                <button type="submit" className="flex-[2] py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-3xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">저장하기</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
