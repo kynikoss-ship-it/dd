@@ -10,21 +10,40 @@ import {
   getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query
 } from 'firebase/firestore';
 
-// --- 환경 변수 및 설정 ---
-const firebaseConfig = JSON.parse(__firebase_config);
+// --- 환경 변수 에러 방지 및 설정 ---
+// __firebase_config가 정의되지 않은 환경(로컬 등)에서도 동작하도록 기존 설정을 폴백(Fallback)으로 사용합니다.
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyCO3bou4eMc-b4npOT99knhwBn_AAt2Kjc",
+      authDomain: "monthly-planner-560a3.firebaseapp.com",
+      projectId: "monthly-planner-560a3",
+      storageBucket: "monthly-planner-560a3.firebasestorage.app",
+      messagingSenderId: "1022766430649",
+      appId: "1:1022766430649:web:f094b81940b863f0481e68"
+    };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'monthly-planner-560a3';
 
-// 한국 시간 기준 YYYY-MM-DD 문자열 생성 함수
+/**
+ * 한국 시간(KST) 기준 YYYY-MM-DD 문자열 생성 함수
+ * Intl.DateTimeFormat을 사용하여 시스템 시간대에 상관없이 Asia/Seoul 시간을 가져옵니다.
+ */
 const getKSTDateString = (date = new Date()) => {
-  return new Intl.DateTimeFormat('ko-KR', {
+  const formatter = new Intl.DateTimeFormat('ko-KR', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     timeZone: 'Asia/Seoul'
-  }).format(date).replace(/\. /g, '-').replace(/\./g, '');
+  });
+  const parts = formatter.formatToParts(date);
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${d}`;
 };
 
 export default function App() {
@@ -39,7 +58,7 @@ export default function App() {
   const [description, setDescription] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // 1. 인증 로직 (시스템 규칙 준수)
+  // 1. 인증 로직 (시스템 규칙 준수 및 익명 로그인 보장)
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -57,7 +76,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. 실시간 데이터 동기화 (표준 경로 사용)
+  // 2. 실시간 데이터 동기화
   useEffect(() => {
     if (!user) return;
 
@@ -66,7 +85,7 @@ export default function App() {
     
     const unsubscribe = onSnapshot(plansRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // 클라이언트 측 정렬 (규칙 2 준수)
+      // 클라이언트 측 정렬 (날짜 순)
       data.sort((a, b) => (a.date > b.date ? 1 : -1));
       setPlans(data);
       setLoading(false);
@@ -144,7 +163,7 @@ export default function App() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen font-sans font-bold gap-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <div className="text-slate-500 text-lg">교무실 학사 일정을 동기화 중입니다...</div>
+        <div className="text-slate-500 text-lg">데이터 연결 중입니다...</div>
       </div>
     );
   }
@@ -163,10 +182,10 @@ export default function App() {
                 <span className="px-6 font-black min-w-[180px] text-center text-2xl tracking-tighter">{year}년 {month + 1}월</span>
                 <button onClick={nextMonth} className="p-2 hover:bg-white rounded-lg transition-all active:scale-95"><ChevronRight size={24}/></button>
               </div>
-              <h1 className="hidden lg:block text-3xl font-black text-slate-900 tracking-tighter">School Academic Calendar</h1>
+              <h1 className="hidden lg:block text-3xl font-black text-slate-900 tracking-tighter uppercase">Academic Calendar</h1>
           </div>
           <div className="text-sm font-bold bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 text-blue-600 shadow-sm">
-            💡 날짜를 클릭하여 주요 학사 일정을 입력하세요
+            💡 날짜를 클릭하여 주요 일정을 입력하세요
           </div>
         </header>
 
@@ -210,6 +229,7 @@ export default function App() {
                   <div className="space-y-2 mt-2">
                     {dayPlans.map(p => (
                       <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-2 rounded-lg bg-white/50 border border-transparent hover:border-slate-200 hover:shadow-sm transition-all">
+                        {/* 학사 일정 글자 크기를 날짜 숫자와 대등하게 키움 (text-xl font-black) */}
                         <span className={`text-xl font-black break-all tracking-tight leading-tight ${isSunday ? 'text-red-700' : 'text-slate-900'}`}>
                           {p.title}
                         </span>
@@ -244,10 +264,10 @@ export default function App() {
               </div>
               <form onSubmit={handleAddPlan} className="p-8 space-y-8">
                 <div>
-                  <label className="text-xs font-black text-slate-400 uppercase mb-3 block tracking-widest">Event Title</label>
+                  <label className="text-xs font-black text-slate-400 uppercase mb-3 block tracking-widest">일정명</label>
                   <input 
                     type="text" 
-                    placeholder="예: 1학기 중간고사, 현장체험학습"
+                    placeholder="예: 기말고사 시작"
                     value={title}
                     autoFocus
                     onChange={(e) => setTitle(e.target.value)}
@@ -256,10 +276,10 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-black text-slate-400 uppercase mb-3 block tracking-widest">Details (Optional)</label>
+                  <label className="text-xs font-black text-slate-400 uppercase mb-3 block tracking-widest">세부 사항</label>
                   <textarea 
                     rows="3"
-                    placeholder="준비물 또는 세부 장소 등"
+                    placeholder="추가 메모"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     className="w-full p-5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold text-xl resize-none transition-all placeholder:text-slate-300"
@@ -267,7 +287,7 @@ export default function App() {
                 </div>
                 <div className="flex gap-4 pt-4">
                   <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-xl transition-colors">취소</button>
-                  <button type="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">일정 저장하기</button>
+                  <button type="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xl shadow-xl shadow-blue-200 active:scale-[0.98] transition-all">저장하기</button>
                 </div>
               </form>
             </div>
