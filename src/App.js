@@ -255,7 +255,7 @@ export default function App() {
           className={`grid ${gridLayout} w-full h-full`}
           style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
         >
-          {/* 1440p 기준 요일 헤더 크기 확대 */}
+          {/* 1440p 기준 요일 헤더 크기 유지 */}
           {['월', '화', '수', '목', '금'].map((d) => (
             <div key={d} className="py-6 text-center text-4xl font-black border-r border-b border-slate-900 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
               {d}
@@ -278,20 +278,23 @@ export default function App() {
                 <div 
                   key={day} 
                   onClick={() => handleDateClick(dateStr)}
-                  className="p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
+                  // 셀 자체의 패딩을 축소하여 내부 공간 확보 (p-3 -> p-2)
+                  className="p-2 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
                 >
-                  <div className="flex justify-between items-start mb-2 shrink-0">
-                    {/* 1440p 기준 날짜 숫자 크기 확대 */}
-                    <span className={`text-3xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : 'text-slate-900'}`}>
+                  {/* 날짜 숫자의 하단 마진 축소 (mb-2 -> mb-1), 크기 약간 조정 (w-14 -> w-12) */}
+                  <div className="flex justify-between items-start mb-1 shrink-0">
+                    <span className={`text-3xl font-black ${isToday ? 'bg-blue-700 text-white w-12 h-12 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : 'text-slate-900'}`}>
                       {day}
                     </span>
                   </div>
                   
-                  <div className="flex-1 space-y-2 mt-0 overflow-y-auto cell-scroll auto-scroll-container pr-2 pb-2">
+                  {/* 일정 리스트 간격 축소 (space-y-2 -> space-y-1, pb-2 -> pb-1) */}
+                  <div className="flex-1 space-y-1 mt-0 overflow-y-auto cell-scroll auto-scroll-container pr-2 pb-1">
                     {dayPlans.map(p => (
-                      <div key={p.id} className="group/item flex items-center justify-between gap-3 py-1.5 px-3 rounded-xl bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
-                        {/* 1440p 기준 일정 텍스트 크기 확대 */}
-                        <span className="text-3xl font-black break-all tracking-tight leading-tight text-slate-900">
+                      // 개별 일정 항목의 상하 패딩 축소 (py-1.5 -> py-1)
+                      <div key={p.id} className="group/item flex items-center justify-between gap-3 py-1 px-3 rounded-xl bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
+                        {/* 폰트 크기는 text-3xl 유지하되, 줄 간격을 leading-none으로 좁힘 */}
+                        <span className="text-3xl font-black break-all tracking-tight leading-none text-slate-900">
                           {p.title}
                         </span>
                         <button 
@@ -309,7 +312,7 @@ export default function App() {
           })}
         </div>
 
-        {/* 1440p 기준 연/월 조작 플로팅 컨트롤러 크기 확대 */}
+        {/* 1440p 기준 연/월 조작 플로팅 컨트롤러 */}
         <div className="absolute bottom-8 right-8 z-40 flex items-center bg-slate-900 text-white rounded-3xl p-3 shadow-[0_10px_40px_rgba(0,0,0,0.5)] border border-slate-600/50 backdrop-blur-md">
           <button onClick={prevMonth} className="p-4 hover:bg-slate-800 rounded-2xl transition-all active:scale-95 text-slate-300 hover:text-white"><ChevronLeft size={48}/></button>
           <span className="px-8 font-black min-w-[300px] text-center text-5xl tracking-tighter">{year}년 {month + 1}월</span>
@@ -317,7 +320,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 1440p 기준 모달창 크기 확대 */}
+      {/* 1440p 기준 모달창 */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white w-full max-w-3xl rounded-[40px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
