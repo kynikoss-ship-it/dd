@@ -98,14 +98,13 @@ export default function App() {
   // --- 자동 스크롤 로직 ---
   useEffect(() => {
     let animationFrameId;
-    const scrollSpeed = 0.5; // 프레임당 이동 픽셀 (속도 조절)
+    const scrollSpeed = 0.5;
 
     const scrollLoop = () => {
       const containers = document.querySelectorAll('.auto-scroll-container');
       const now = Date.now();
       
       containers.forEach(container => {
-        // 이벤트 리스너 및 초기 상태 할당
         if (!container.dataset.initialized) {
           container.addEventListener('mouseenter', () => container.dataset.isHovered = 'true');
           container.addEventListener('mouseleave', () => container.dataset.isHovered = 'false');
@@ -114,19 +113,16 @@ export default function App() {
           container.dataset.initialized = 'true';
         }
 
-        // 마우스 호버 시 수동 스크롤 위치를 동기화하고 자동 스크롤 정지
         if (container.dataset.isHovered === 'true') {
           container.dataset.exactScroll = container.scrollTop;
           return;
         }
         
-        // 스크롤이 불필요한 경우 초기화
         if (container.scrollHeight <= container.clientHeight) {
           container.scrollTop = 0;
           return;
         }
         
-        // 양 끝단 도달 시 설정된 대기 시간 확인
         const pauseUntil = parseInt(container.dataset.pauseUntil || '0', 10);
         if (now < pauseUntil) return;
 
@@ -137,7 +133,6 @@ export default function App() {
         container.dataset.exactScroll = exactScroll;
         container.scrollTop = exactScroll;
 
-        // 경계선 도달 시 방향 전환 및 2초 대기
         if (dir === 1 && container.scrollTop >= container.scrollHeight - container.clientHeight - 1) {
           container.dataset.direction = '-1';
           container.dataset.pauseUntil = (now + 2000).toString();
@@ -150,7 +145,6 @@ export default function App() {
     };
 
     animationFrameId = requestAnimationFrame(scrollLoop);
-
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
@@ -223,7 +217,7 @@ export default function App() {
   }
 
   const todayStr = getKSTDateString();
-  const gridLayout = "grid-cols-[0.8fr_1.3fr_1.3fr_1.3fr_1.3fr_1.3fr_0.8fr]";
+  const gridLayout = "grid-cols-5";
   const weeksCount = calendarDays.length / 7;
 
   return (
@@ -247,16 +241,14 @@ export default function App() {
           className={`grid ${gridLayout} w-full h-full`}
           style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
         >
-          {['일', '월', '화', '수', '목', '금', '토'].map((d, idx) => (
-            <div key={d} className={`py-4 text-center text-3xl font-black border-r border-b border-slate-900 last:border-r-0 flex items-center justify-center
-              ${idx === 0 ? 'bg-red-200 text-red-900' : idx === 6 ? 'bg-blue-200 text-blue-900' : 'bg-yellow-500 text-slate-900'}`}>
+          {['월', '화', '수', '목', '금'].map((d) => (
+            <div key={d} className="py-4 text-center text-3xl font-black border-r border-b border-slate-900 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
               {d}
             </div>
           ))}
 
           {calendarDays.map((day, idx) => {
-            const isSunday = idx % 7 === 0;
-            const isSaturday = idx % 7 === 6;
+            if (idx % 7 === 0 || idx % 7 === 6) return null; // 일요일(0), 토요일(6) 렌더링 제외
 
             if (day === null) {
               return <div key={`empty-${idx}`} className={`border-r border-t border-slate-900 bg-slate-200`}></div>;
@@ -270,21 +262,18 @@ export default function App() {
               <div 
                 key={day} 
                 onClick={() => handleDateClick(dateStr)}
-                className={`p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden
-                  ${isSunday ? 'bg-red-200 hover:bg-red-300' : isSaturday ? 'bg-blue-200 hover:bg-blue-300' : 'bg-white hover:bg-slate-100'}
-                `}
+                className="p-3 border-r border-t border-slate-900 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-slate-100"
               >
                 <div className="flex justify-between items-start mb-2 shrink-0">
-                  <span className={`text-4xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
+                  <span className={`text-4xl font-black ${isToday ? 'bg-blue-700 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-lg ring-4 ring-blue-200' : 'text-slate-900'}`}>
                     {day}
                   </span>
                 </div>
                 
-                {/* auto-scroll-container 클래스 추가를 통해 스크립트가 해당 요소를 인지하도록 구성 */}
                 <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll auto-scroll-container pr-1 pb-4">
                   {dayPlans.map(p => (
                     <div key={p.id} className="group/item flex items-start justify-between gap-2 py-1.5 px-3 rounded-lg bg-white/60 border border-transparent hover:border-slate-400 hover:shadow-md transition-all">
-                      <span className={`text-3xl font-black break-all tracking-tight leading-tight ${isSunday ? 'text-red-900' : isSaturday ? 'text-blue-900' : 'text-slate-900'}`}>
+                      <span className="text-3xl font-black break-all tracking-tight leading-tight text-slate-900">
                         {p.title}
                       </span>
                       <button 
