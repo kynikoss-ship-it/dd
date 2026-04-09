@@ -41,6 +41,24 @@ const getKSTDateString = (date = new Date()) => {
   return `${y}-${m}-${d}`;
 };
 
+// KST 기준 다음 00:00 또는 12:00까지 남은 밀리초 계산
+const getMsToNextHalfDayKST = () => {
+  const now = new Date();
+  const utcNow = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const kstNow = new Date(utcNow + (9 * 3600000));
+
+  const target = new Date(kstNow);
+  if (kstNow.getHours() < 12) {
+    target.setHours(12, 0, 0, 0); // 오늘 정오
+  } else {
+    target.setDate(target.getDate() + 1);
+    target.setHours(0, 0, 0, 0); // 내일 자정
+  }
+
+  // 정확한 트리거를 위해 1초(1000ms) 여유를 둠
+  return target.getTime() - kstNow.getTime() + 1000;
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [plans, setPlans] = useState([]);
@@ -52,6 +70,16 @@ export default function App() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // --- 자동 새로고침(KST 기준 00시, 12시) ---
+  useEffect(() => {
+    const timeToNextRefresh = getMsToNextHalfDayKST();
+    const refreshTimer = setTimeout(() => {
+      window.location.reload();
+    }, timeToNextRefresh);
+
+    return () => clearTimeout(refreshTimer);
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
