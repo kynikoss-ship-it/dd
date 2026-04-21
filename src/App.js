@@ -70,7 +70,7 @@ const COLOR_THEMES = [
   { id: 'blue', hex: '#2563eb', label: '업무' },    
   { id: 'purple', hex: '#a855f7', label: '평가/시험' },  
   { id: 'orange', hex: '#f59e0b', label: '행사/일정' },  
-  { id: 'gray', hex: '#64748b', label: '기본' },     
+  { id: 'green', hex: '#10b981', label: '기본' },     
 ];
 
 const getThemeStyle = (colorId) => {
@@ -88,7 +88,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(getKSTDateString());
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedColor, setSelectedColor] = useState('gray');
+  const [selectedColor, setSelectedColor] = useState('green');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
@@ -246,7 +246,7 @@ export default function App() {
 
   const handleDateClick = (dateStr) => {
     setSelectedDate(dateStr);
-    setSelectedColor('gray'); 
+    setSelectedColor('green'); 
     setIsModalOpen(true);
   };
 
