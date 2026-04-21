@@ -7,7 +7,7 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp
+  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc
 } from 'firebase/firestore';
 
 // --- 환경 변수 에러 방지 및 설정 ---
@@ -64,7 +64,7 @@ const getMsToNextHalfDayKST = () => {
   return target.getTime() - kstNow.getTime() + 1000;
 };
 
-// 테마 색상 설정 (CSS 렌더링 누락 방지를 위해 명시적 HEX 코드 사용)
+// 테마 색상 설정
 const COLOR_THEMES = [
   { id: 'red', hex: '#ef4444', label: '중요' },     
   { id: 'blue', hex: '#2563eb', label: '업무' },    
@@ -110,7 +110,7 @@ export default function App() {
         }
       } catch (err) {
         console.error("Auth Error:", err);
-        setLoading(false); // 인증 실패 시 로딩 해제
+        setLoading(false); 
       }
     };
     initAuth();
@@ -118,11 +118,10 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) {
-        setLoading(false); // 유저 정보가 없을 때도 로딩 해제하여 무한 로딩 방지
+        setLoading(false); 
       }
     });
 
-    // 네트워크 문제 등으로 무한 로딩에 빠지는 것 방지 (5초 타임아웃)
     const fallbackTimer = setTimeout(() => {
       setLoading(false);
     }, 5000);
@@ -140,7 +139,12 @@ export default function App() {
     
     const unsubscribe = onSnapshot(plansRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      data.sort((a, b) => (a.date > b.date ? 1 : -1));
+      // 날짜순, 이후 order 순으로 정렬
+      data.sort((a, b) => {
+        if (a.date > b.date) return 1;
+        if (a.date < b.date) return -1;
+        return (a.order || 0) - (b.order || 0);
+      });
       setPlans(data);
       setLoading(false);
     }, (err) => {
@@ -255,12 +259,16 @@ export default function App() {
     if (!user || !title.trim()) return;
 
     try {
+      const dayPlans = plans.filter(p => p.date === selectedDate);
+      const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
+
       const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
       await addDoc(plansRef, {
         date: selectedDate,
         title,
         description,
         color: selectedColor,
+        order: nextOrder,
         createdAt: serverTimestamp(),
         userId: user.uid
       });
@@ -281,6 +289,38 @@ export default function App() {
       setMessage({ type: 'success', text: '삭제되었습니다.' });
     } catch (error) {
       setMessage({ type: 'error', text: '삭제 실패' });
+    }
+  };
+
+  // 드래그 앤 드롭 정렬 핸들러 (같은 날짜 안에서만 동작)
+  const handleDrop = async (e, targetPlan) => {
+    e.preventDefault();
+    e.stopPropagation(); // 부모 엘리먼트 클릭 이벤트 방지
+    const draggedId = e.dataTransfer.getData('text/plain');
+    if (!draggedId || draggedId === targetPlan.id) return;
+
+    const draggedPlan = plans.find(p => p.id === draggedId);
+    if (!draggedPlan || draggedPlan.date !== targetPlan.date) return;
+
+    const dayPlans = plans.filter(p => p.date === targetPlan.date).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const draggedIdx = dayPlans.findIndex(p => p.id === draggedId);
+    const targetIdx = dayPlans.findIndex(p => p.id === targetPlan.id);
+
+    // 배열 순서 재정렬
+    const newDayPlans = [...dayPlans];
+    newDayPlans.splice(draggedIdx, 1);
+    newDayPlans.splice(targetIdx, 0, draggedPlan);
+
+    try {
+      // 변경된 순서에 맞춰 order 값 일괄 업데이트
+      const updates = newDayPlans.map((plan, index) => {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', plan.id);
+        return updateDoc(docRef, { order: index });
+      });
+      await Promise.all(updates);
+    } catch (error) {
+      console.error("Order update error:", error);
+      setMessage({ type: 'error', text: '순서 변경 실패' });
     }
   };
 
@@ -318,7 +358,7 @@ export default function App() {
           className={`grid ${gridLayout} w-full h-full`}
           style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
         >
-          {/* 요일 헤더: 배경색 노란색, 글자 크기 text-4xl로 확장 */}
+          {/* 요일 헤더 */}
           {['월', '화', '수', '목', '금'].map((d) => (
             <div key={d} className="py-4 text-center text-4xl font-black border-r border-b border-slate-200 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
               {d}
@@ -344,7 +384,7 @@ export default function App() {
                   className="p-1.5 border-r border-b border-slate-200 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-blue-50/50"
                 >
                   <div className="flex justify-start items-start mb-1 shrink-0 px-1 pt-1">
-                    {/* 날짜 숫자 크기 text-4xl로 확장 */}
+                    {/* 날짜 숫자 */}
                     <span className={`text-4xl font-bold ${isToday ? 'bg-blue-600 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-md' : 'text-slate-700'}`}>
                       {day}
                     </span>
@@ -355,11 +395,21 @@ export default function App() {
                     {dayPlans.map(p => (
                       <div 
                         key={p.id} 
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', p.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDrop={(e) => handleDrop(e, p)}
+                        onClick={(e) => e.stopPropagation()} // 일정 자체 클릭 시 빈 공간 클릭(새 일정 등록) 트리거 방지
                         style={getThemeStyle(p.color)}
-                        className="group/item flex items-center justify-between gap-1 py-2 px-2.5 rounded-md transition-all shadow-sm"
+                        className="group/item flex items-center justify-between gap-1 py-2 px-2.5 rounded-md transition-all shadow-sm cursor-grab active:cursor-grabbing"
                       >
-                        {/* 일정 글자 크기 text-3xl로 확장 */}
-                        <span className="text-3xl font-semibold break-all tracking-tight leading-tight flex-1">
+                        <span className="text-3xl font-semibold break-all tracking-tight leading-tight flex-1 pointer-events-none">
                           {p.title}
                         </span>
                         <button 
@@ -402,8 +452,6 @@ export default function App() {
             </div>
             
             <form onSubmit={handleAddPlan} className="p-8 space-y-8">
-              
-              {/* 색상(중요도) 선택 섹션: HEX 코드 직접 적용 */}
               <div>
                 <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
                 <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
