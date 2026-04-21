@@ -462,7 +462,7 @@ export default function App() {
                     </span>
                   </div>
                   
-                  <div className="flex-1 space-y-1.5 mt-1 overflow-y-auto cell-scroll auto-scroll-container pb-1">
+                  <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll auto-scroll-container pb-1">
                     {dayPlans.map(p => (
                       <div 
                         key={p.id} 
@@ -478,16 +478,16 @@ export default function App() {
                         onDrop={(e) => handleDrop(e, p)}
                         onClick={(e) => handlePlanClick(e, p)}
                         style={getThemeStyle(p.color)}
-                        className="group/item flex items-center justify-between gap-1 py-2 px-2.5 rounded-md transition-all shadow-sm cursor-grab active:cursor-grabbing hover:brightness-95"
+                        className="group/item flex items-center justify-between gap-2 py-3 px-3 rounded-lg transition-all shadow-md cursor-grab active:cursor-grabbing hover:brightness-95"
                       >
-                        <span className="text-3xl font-semibold break-all tracking-tight leading-tight flex-1 pointer-events-none">
+                        <span className="text-4xl font-extrabold break-all tracking-tight leading-snug flex-1 pointer-events-none drop-shadow-sm">
                           {p.title}
                         </span>
                         <button 
                           onClick={(e) => handleDelete(e, p.id)} 
-                          className="opacity-0 group-hover/item:opacity-100 text-white/70 hover:text-white shrink-0 p-1 bg-black/20 rounded-md transition-opacity"
+                          className="opacity-0 group-hover/item:opacity-100 text-white/80 hover:text-white shrink-0 p-1.5 bg-black/25 rounded-md transition-opacity"
                         >
-                          <X size={20} />
+                          <X size={28} />
                         </button>
                       </div>
                     ))}
