@@ -64,18 +64,18 @@ const getMsToNextHalfDayKST = () => {
   return target.getTime() - kstNow.getTime() + 1000;
 };
 
-// 테마 색상 설정 (라이트 모드에서도 눈에 잘 띄는 블록형 색상)
+// 테마 색상 설정 (CSS 렌더링 누락 방지를 위해 명시적 HEX 코드 사용)
 const COLOR_THEMES = [
-  { id: 'red', bg: 'bg-red-500', text: 'text-white', label: '중요' },     
-  { id: 'blue', bg: 'bg-blue-600', text: 'text-white', label: '업무' },    
-  { id: 'purple', bg: 'bg-purple-500', text: 'text-white', label: '평가/시험' },  
-  { id: 'orange', bg: 'bg-amber-500', text: 'text-white', label: '행사/일정' },  
-  { id: 'gray', bg: 'bg-slate-500', text: 'text-white', label: '기본' },     
+  { id: 'red', hex: '#ef4444', label: '중요' },     
+  { id: 'blue', hex: '#2563eb', label: '업무' },    
+  { id: 'purple', hex: '#a855f7', label: '평가/시험' },  
+  { id: 'orange', hex: '#f59e0b', label: '행사/일정' },  
+  { id: 'gray', hex: '#64748b', label: '기본' },     
 ];
 
-const getColorClasses = (colorId) => {
+const getThemeStyle = (colorId) => {
   const theme = COLOR_THEMES.find(t => t.id === colorId) || COLOR_THEMES[4];
-  return `${theme.bg} ${theme.text}`;
+  return { backgroundColor: theme.hex, color: '#ffffff' };
 };
 
 export default function App() {
@@ -298,7 +298,6 @@ export default function App() {
   const weeksCount = validWeeks.length;
 
   return (
-    // 라이트 모드 톤 적용
     <div className="h-screen w-screen bg-slate-100 p-4 text-slate-800 font-sans selection:bg-blue-200 flex flex-col overflow-hidden">
       
       <style>{`
@@ -314,15 +313,14 @@ export default function App() {
         </div>
       )}
 
-      {/* 달력 본문 컨테이너 (라이트 모드) */}
       <div className="flex-1 w-full h-full bg-white shadow-xl rounded-xl overflow-hidden border border-slate-300 flex flex-col relative">
         <div 
           className={`grid ${gridLayout} w-full h-full`}
           style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
         >
-          {/* 요일 헤더 */}
+          {/* 요일 헤더: 배경색 노란색, 글자 크기 text-4xl로 확장 */}
           {['월', '화', '수', '목', '금'].map((d) => (
-            <div key={d} className="py-4 text-center text-3xl font-bold border-r border-b border-slate-200 last:border-r-0 flex items-center justify-center bg-slate-50 text-slate-600">
+            <div key={d} className="py-4 text-center text-4xl font-black border-r border-b border-slate-200 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
               {d}
             </div>
           ))}
@@ -346,8 +344,8 @@ export default function App() {
                   className="p-1.5 border-r border-b border-slate-200 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-blue-50/50"
                 >
                   <div className="flex justify-start items-start mb-1 shrink-0 px-1 pt-1">
-                    {/* 날짜 숫자 */}
-                    <span className={`text-3xl font-bold ${isToday ? 'bg-blue-600 text-white w-10 h-10 flex items-center justify-center rounded-full shadow-md' : 'text-slate-600'}`}>
+                    {/* 날짜 숫자 크기 text-4xl로 확장 */}
+                    <span className={`text-4xl font-bold ${isToday ? 'bg-blue-600 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-md' : 'text-slate-700'}`}>
                       {day}
                     </span>
                   </div>
@@ -357,16 +355,18 @@ export default function App() {
                     {dayPlans.map(p => (
                       <div 
                         key={p.id} 
-                        className={`group/item flex items-center justify-between gap-1 py-1.5 px-2.5 rounded-md ${getColorClasses(p.color)} transition-all shadow-sm`}
+                        style={getThemeStyle(p.color)}
+                        className="group/item flex items-center justify-between gap-1 py-2 px-2.5 rounded-md transition-all shadow-sm"
                       >
-                        <span className="text-2xl font-semibold break-all tracking-tight leading-tight flex-1">
+                        {/* 일정 글자 크기 text-3xl로 확장 */}
+                        <span className="text-3xl font-semibold break-all tracking-tight leading-tight flex-1">
                           {p.title}
                         </span>
                         <button 
                           onClick={(e) => handleDelete(e, p.id)} 
                           className="opacity-0 group-hover/item:opacity-100 text-white/70 hover:text-white shrink-0 p-1 bg-black/20 rounded-md transition-opacity"
                         >
-                          <X size={18} />
+                          <X size={20} />
                         </button>
                       </div>
                     ))}
@@ -385,7 +385,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 일정 등록 모달 (라이트 모드) */}
+      {/* 일정 등록 모달 */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
@@ -403,7 +403,7 @@ export default function App() {
             
             <form onSubmit={handleAddPlan} className="p-8 space-y-8">
               
-              {/* 색상(중요도) 선택 섹션 */}
+              {/* 색상(중요도) 선택 섹션: HEX 코드 직접 적용 */}
               <div>
                 <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
                 <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
@@ -412,10 +412,11 @@ export default function App() {
                       key={theme.id}
                       입력="button"
                       onClick={() => setSelectedColor(theme.id)}
-                      className={`relative flex flex-col items-center justify-center p-3 rounded-xl transition-all ${theme.bg} ${selectedColor === theme.id ? 'ring-4 ring-blue-200 shadow-md scale-105' : 'opacity-85 hover:opacity-100 shadow-sm'}`}
+                      style={{ backgroundColor: theme.hex }}
+                      className={`relative flex flex-col items-center justify-center p-3 rounded-xl transition-all ${selectedColor === theme.id ? 'ring-4 ring-blue-400 shadow-lg scale-105' : 'opacity-85 hover:opacity-100 shadow-sm'}`}
                     >
                       {selectedColor === theme.id && <Check size={20} className="text-white absolute top-1 right-1" />}
-                      <span className="text-white font-semibold text-sm mt-1">{theme.label}</span>
+                      <span className="text-white font-semibold text-base mt-1">{theme.label}</span>
                     </button>
                   ))}
                 </div>
