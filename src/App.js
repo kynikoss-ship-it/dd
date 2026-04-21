@@ -90,6 +90,7 @@ export default function App() {
   const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState('green');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPlanId, setEditingPlanId] = useState(null); // 수정 모드 상태 추가
 
   useEffect(() => {
     const timeToNextRefresh = getMsToNextHalfDayKST();
@@ -248,33 +249,63 @@ export default function App() {
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
 
+  // 날짜 클릭 - 새 일정 등록 모드
   const handleDateClick = (dateStr) => {
+    setEditingPlanId(null);
     setSelectedDate(dateStr);
+    setTitle('');
+    setDescription('');
     setSelectedColor('green'); 
     setIsModalOpen(true);
   };
 
-  const handleAddPlan = async (e) => {
+  // 기존 일정 클릭 - 일정 수정 모드
+  const handlePlanClick = (e, plan) => {
+    e.stopPropagation();
+    setEditingPlanId(plan.id);
+    setSelectedDate(plan.date);
+    setTitle(plan.title);
+    setDescription(plan.description || '');
+    setSelectedColor(plan.color || 'green');
+    setIsModalOpen(true);
+  };
+
+  const handleSavePlan = async (e) => {
     e.preventDefault();
     if (!user || !title.trim()) return;
 
     try {
-      const dayPlans = plans.filter(p => p.date === selectedDate);
-      const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
+      if (editingPlanId) {
+        // 기존 일정 수정
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', editingPlanId);
+        await updateDoc(docRef, {
+          title,
+          description,
+          color: selectedColor
+        });
+        setMessage({ type: 'success', text: '일정이 수정되었습니다.' });
+      } else {
+        // 새 일정 추가
+        const dayPlans = plans.filter(p => p.date === selectedDate);
+        const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
 
-      const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
-      await addDoc(plansRef, {
-        date: selectedDate,
-        title,
-        description,
-        color: selectedColor,
-        order: nextOrder,
-        createdAt: serverTimestamp(),
-        userId: user.uid
-      });
-      setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
+        const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
+        await addDoc(plansRef, {
+          date: selectedDate,
+          title,
+          description,
+          color: selectedColor,
+          order: nextOrder,
+          createdAt: serverTimestamp(),
+          userId: user.uid
+        });
+        setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
+      }
+      
+      // 상태 초기화 및 모달 닫기
       setTitle('');
       setDescription('');
+      setEditingPlanId(null);
       setIsModalOpen(false);
     } catch (error) {
       setMessage({ type: 'error', text: '저장 실패' });
@@ -295,7 +326,7 @@ export default function App() {
   // 드래그 앤 드롭 정렬 핸들러 (같은 날짜 안에서만 동작)
   const handleDrop = async (e, targetPlan) => {
     e.preventDefault();
-    e.stopPropagation(); // 부모 엘리먼트 클릭 이벤트 방지
+    e.stopPropagation();
     const draggedId = e.dataTransfer.getData('text/plain');
     if (!draggedId || draggedId === targetPlan.id) return;
 
@@ -405,9 +436,9 @@ export default function App() {
                           e.dataTransfer.dropEffect = 'move';
                         }}
                         onDrop={(e) => handleDrop(e, p)}
-                        onClick={(e) => e.stopPropagation()} // 일정 자체 클릭 시 빈 공간 클릭(새 일정 등록) 트리거 방지
+                        onClick={(e) => handlePlanClick(e, p)}
                         style={getThemeStyle(p.color)}
-                        className="group/item flex items-center justify-between gap-1 py-2 px-2.5 rounded-md transition-all shadow-sm cursor-grab active:cursor-grabbing"
+                        className="group/item flex items-center justify-between gap-1 py-2 px-2.5 rounded-md transition-all shadow-sm cursor-grab active:cursor-grabbing hover:brightness-95"
                       >
                         <span className="text-3xl font-semibold break-all tracking-tight leading-tight flex-1 pointer-events-none">
                           {p.title}
@@ -435,7 +466,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 일정 등록 모달 */}
+      {/* 일정 등록/수정 모달 */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
@@ -444,14 +475,20 @@ export default function App() {
                 <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-md">
                   <CalendarIcon size={28} />
                 </div>
-                {selectedDate} 일정 등록
+                {selectedDate} {editingPlanId ? '일정 수정' : '일정 등록'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+              <button 
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setEditingPlanId(null);
+                }} 
+                className="p-3 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors"
+              >
                 <X size={36} />
               </button>
             </div>
             
-            <form onSubmit={handleAddPlan} className="p-8 space-y-8">
+            <form onSubmit={handleSavePlan} className="p-8 space-y-8">
               <div>
                 <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
                 <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
@@ -495,8 +532,19 @@ export default function App() {
               </div>
               
               <div className="flex gap-4 pt-4">
-                <button 입력="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-2xl transition-colors">취소</button>
-                <button 입력="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all">저장하기</button>
+                <button 
+                  입력="button" 
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    setEditingPlanId(null);
+                  }} 
+                  className="flex-1 py-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-2xl transition-colors"
+                >
+                  취소
+                </button>
+                <button 입력="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all">
+                  {editingPlanId ? '수정하기' : '저장하기'}
+                </button>
               </div>
             </form>
           </div>
