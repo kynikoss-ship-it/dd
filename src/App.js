@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Check
 } from 'lucide-react';
@@ -90,7 +90,12 @@ export default function App() {
   const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState('green');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingPlanId, setEditingPlanId] = useState(null); // 수정 모드 상태 추가
+  const [editingPlanId, setEditingPlanId] = useState(null);
+
+  // 컨트롤러 드래그 상태 관리
+  const [ctrlPos, setCtrlPos] = useState({ x: 0, y: 0 });
+  const [isDraggingCtrl, setIsDraggingCtrl] = useState(false);
+  const dragStartOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     const timeToNextRefresh = getMsToNextHalfDayKST();
@@ -216,6 +221,38 @@ export default function App() {
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
+  // 플로팅 컨트롤러 드래그 이벤트 등록
+  useEffect(() => {
+    const handleDragMove = (e) => {
+      if (!isDraggingCtrl) return;
+      const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+      const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+      
+      setCtrlPos({
+        x: clientX - dragStartOffset.current.x,
+        y: clientY - dragStartOffset.current.y
+      });
+    };
+
+    const handleDragEnd = () => {
+      setIsDraggingCtrl(false);
+    };
+
+    if (isDraggingCtrl) {
+      window.addEventListener('mousemove', handleDragMove);
+      window.addEventListener('mouseup', handleDragEnd);
+      window.addEventListener('touchmove', handleDragMove, { passive: false });
+      window.addEventListener('touchend', handleDragEnd);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleDragMove);
+      window.removeEventListener('mouseup', handleDragEnd);
+      window.removeEventListener('touchmove', handleDragMove);
+      window.removeEventListener('touchend', handleDragEnd);
+    };
+  }, [isDraggingCtrl]);
+
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -249,7 +286,20 @@ export default function App() {
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
 
-  // 날짜 클릭 - 새 일정 등록 모드
+  const handleCtrlDragStart = (e) => {
+    // 내부 버튼 클릭 시 드래그 동작 무시
+    if (e.target.closest('button')) return;
+    
+    setIsDraggingCtrl(true);
+    const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+    const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+    
+    dragStartOffset.current = {
+      x: clientX - ctrlPos.x,
+      y: clientY - ctrlPos.y
+    };
+  };
+
   const handleDateClick = (dateStr) => {
     setEditingPlanId(null);
     setSelectedDate(dateStr);
@@ -259,7 +309,6 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  // 기존 일정 클릭 - 일정 수정 모드
   const handlePlanClick = (e, plan) => {
     e.stopPropagation();
     setEditingPlanId(plan.id);
@@ -276,7 +325,6 @@ export default function App() {
 
     try {
       if (editingPlanId) {
-        // 기존 일정 수정
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', editingPlanId);
         await updateDoc(docRef, {
           title,
@@ -285,7 +333,6 @@ export default function App() {
         });
         setMessage({ type: 'success', text: '일정이 수정되었습니다.' });
       } else {
-        // 새 일정 추가
         const dayPlans = plans.filter(p => p.date === selectedDate);
         const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
 
@@ -302,7 +349,6 @@ export default function App() {
         setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
       }
       
-      // 상태 초기화 및 모달 닫기
       setTitle('');
       setDescription('');
       setEditingPlanId(null);
@@ -323,7 +369,6 @@ export default function App() {
     }
   };
 
-  // 드래그 앤 드롭 정렬 핸들러 (같은 날짜 안에서만 동작)
   const handleDrop = async (e, targetPlan) => {
     e.preventDefault();
     e.stopPropagation();
@@ -337,13 +382,11 @@ export default function App() {
     const draggedIdx = dayPlans.findIndex(p => p.id === draggedId);
     const targetIdx = dayPlans.findIndex(p => p.id === targetPlan.id);
 
-    // 배열 순서 재정렬
     const newDayPlans = [...dayPlans];
     newDayPlans.splice(draggedIdx, 1);
     newDayPlans.splice(targetIdx, 0, draggedPlan);
 
     try {
-      // 변경된 순서에 맞춰 order 값 일괄 업데이트
       const updates = newDayPlans.map((plan, index) => {
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', plan.id);
         return updateDoc(docRef, { order: index });
@@ -389,7 +432,6 @@ export default function App() {
           className={`grid ${gridLayout} w-full h-full`}
           style={{ gridTemplateRows: `auto repeat(${weeksCount}, minmax(0, 1fr))` }}
         >
-          {/* 요일 헤더 */}
           {['월', '화', '수', '목', '금'].map((d) => (
             <div key={d} className="py-4 text-center text-4xl font-black border-r border-b border-slate-200 last:border-r-0 flex items-center justify-center bg-yellow-500 text-slate-900">
               {d}
@@ -415,13 +457,11 @@ export default function App() {
                   className="p-1.5 border-r border-b border-slate-200 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-blue-50/50"
                 >
                   <div className="flex justify-start items-start mb-1 shrink-0 px-1 pt-1">
-                    {/* 날짜 숫자 */}
                     <span className={`text-4xl font-bold ${isToday ? 'bg-blue-600 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-md' : 'text-slate-700'}`}>
                       {day}
                     </span>
                   </div>
                   
-                  {/* 일정 목록 컨테이너 */}
                   <div className="flex-1 space-y-1.5 mt-1 overflow-y-auto cell-scroll auto-scroll-container pb-1">
                     {dayPlans.map(p => (
                       <div 
@@ -458,15 +498,19 @@ export default function App() {
           })}
         </div>
 
-        {/* 연/월 조작 플로팅 컨트롤러 */}
-        <div className="absolute bottom-6 right-6 z-40 flex items-center bg-white text-slate-800 rounded-xl p-1.5 shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200">
-          <button onClick={prevMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800"><ChevronLeft size={36}/></button>
-          <span className="px-6 font-bold min-w-[220px] text-center text-3xl tracking-tighter">{year}년 {month + 1}월</span>
-          <button onClick={nextMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800"><ChevronRight size={36}/></button>
+        {/* 연/월 조작 플로팅 컨트롤러 - 드래그 기능 적용 */}
+        <div 
+          className={`absolute bottom-6 right-6 z-40 flex items-center bg-white text-slate-800 rounded-xl p-1.5 shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 select-none ${isDraggingCtrl ? 'cursor-grabbing' : 'cursor-grab'}`}
+          style={{ transform: `translate(${ctrlPos.x}px, ${ctrlPos.y}px)` }}
+          onMouseDown={handleCtrlDragStart}
+          onTouchStart={handleCtrlDragStart}
+        >
+          <button onClick={prevMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800 cursor-pointer"><ChevronLeft size={36}/></button>
+          <span className="px-6 font-bold min-w-[220px] text-center text-3xl tracking-tighter pointer-events-none">{year}년 {month + 1}월</span>
+          <button onClick={nextMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800 cursor-pointer"><ChevronRight size={36}/></button>
         </div>
       </div>
 
-      {/* 일정 등록/수정 모달 */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
