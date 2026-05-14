@@ -7,7 +7,7 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc
+  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch
 } from 'firebase/firestore';
 
 // --- 환경 변수 에러 방지 및 설정 ---
@@ -73,10 +73,16 @@ const COLOR_THEMES = [
   { id: 'green', hex: '#10b981', label: '기본' },     
 ];
 
+const DEFAULT_THEME = COLOR_THEMES.find(t => t.id === 'green') ?? COLOR_THEMES[0];
+
 const getThemeStyle = (colorId) => {
-  const theme = COLOR_THEMES.find(t => t.id === colorId) || COLOR_THEMES[4];
+  const theme = COLOR_THEMES.find(t => t.id === colorId) ?? DEFAULT_THEME;
   return { backgroundColor: theme.hex, color: '#ffffff' };
 };
+
+// 플로팅 컨트롤러 대략적인 크기 (clamp용)
+const CTRL_WIDTH = 360;
+const CTRL_HEIGHT = 70;
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -97,16 +103,22 @@ export default function App() {
   const [isDraggingCtrl, setIsDraggingCtrl] = useState(false);
   const dragStartOffset = useRef({ x: 0, y: 0 });
 
+  // 날짜 자동 갱신: 풀 리로드 대신 selectedDate만 새로고침
   useEffect(() => {
-    const timeToNextRefresh = getMsToNextHalfDayKST();
-    const refreshTimer = setTimeout(() => {
-      window.location.reload();
-    }, timeToNextRefresh);
-
-    return () => clearTimeout(refreshTimer);
+    let timerId;
+    const scheduleNext = () => {
+      timerId = setTimeout(() => {
+        setSelectedDate(getKSTDateString());
+        scheduleNext();
+      }, getMsToNextHalfDayKST());
+    };
+    scheduleNext();
+    return () => clearTimeout(timerId);
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -116,23 +128,26 @@ export default function App() {
         }
       } catch (err) {
         console.error("Auth Error:", err);
-        setLoading(false); 
+        if (!cancelled) setLoading(false); 
       }
     };
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (cancelled) return;
       setUser(currentUser);
-      if (!currentUser) {
-        setLoading(false); 
-      }
+      if (!currentUser) setLoading(false); 
     });
 
+    // 5초 폴백: 인증 실패 시 무한 로딩 방지용 (에러 상태로 전환)
     const fallbackTimer = setTimeout(() => {
+      if (cancelled) return;
       setLoading(false);
+      setMessage({ type: 'error', text: '연결 지연. 새로고침을 시도해 주세요.' });
     }, 5000);
 
     return () => {
+      cancelled = true;
       unsubscribe();
       clearTimeout(fallbackTimer);
     };
@@ -168,25 +183,42 @@ export default function App() {
     }
   }, [message]);
 
+  // 자동 스크롤: 매 프레임 querySelectorAll 회피 + 리스너 누수 제거
   useEffect(() => {
     let animationFrameId;
     const scrollSpeed = 0.5;
+    const trackedContainers = new WeakMap(); // container -> { isHovered, direction, exactScroll, pauseUntil, onEnter, onLeave }
+
+    const ensureTracked = (container) => {
+      if (trackedContainers.has(container)) return trackedContainers.get(container);
+      const state = {
+        isHovered: false,
+        direction: 1,
+        exactScroll: 0,
+        pauseUntil: 0,
+      };
+      state.onEnter = () => { state.isHovered = true; };
+      state.onLeave = () => { state.isHovered = false; };
+      container.addEventListener('mouseenter', state.onEnter);
+      container.addEventListener('mouseleave', state.onLeave);
+      trackedContainers.set(container, state);
+      return state;
+    };
+
+    let registered = new Set();
 
     const scrollLoop = () => {
       const containers = document.querySelectorAll('.auto-scroll-container');
       const now = Date.now();
-      
-      containers.forEach(container => {
-        if (!container.dataset.initialized) {
-          container.addEventListener('mouseenter', () => container.dataset.isHovered = 'true');
-          container.addEventListener('mouseleave', () => container.dataset.isHovered = 'false');
-          container.dataset.direction = '1';
-          container.dataset.exactScroll = '0';
-          container.dataset.initialized = 'true';
-        }
+      const seen = new Set();
 
-        if (container.dataset.isHovered === 'true') {
-          container.dataset.exactScroll = container.scrollTop;
+      containers.forEach(container => {
+        seen.add(container);
+        const state = ensureTracked(container);
+        registered.add(container);
+
+        if (state.isHovered) {
+          state.exactScroll = container.scrollTop;
           return;
         }
         
@@ -195,43 +227,75 @@ export default function App() {
           return;
         }
         
-        const pauseUntil = parseInt(container.dataset.pauseUntil || '0', 10);
-        if (now < pauseUntil) return;
+        if (now < state.pauseUntil) return;
 
-        let dir = parseFloat(container.dataset.direction || '1');
-        let exactScroll = parseFloat(container.dataset.exactScroll || '0');
-        if (isNaN(exactScroll)) exactScroll = 0;
-        
-        exactScroll += dir * scrollSpeed;
-        container.dataset.exactScroll = exactScroll;
-        container.scrollTop = exactScroll;
+        state.exactScroll += state.direction * scrollSpeed;
+        container.scrollTop = state.exactScroll;
 
-        if (dir === 1 && container.scrollTop >= container.scrollHeight - container.clientHeight - 1) {
-          container.dataset.direction = '-1';
-          container.dataset.pauseUntil = (now + 2000).toString();
-        } else if (dir === -1 && container.scrollTop <= 0) {
-          container.dataset.direction = '1';
-          container.dataset.pauseUntil = (now + 2000).toString();
+        if (state.direction === 1 && container.scrollTop >= container.scrollHeight - container.clientHeight - 1) {
+          state.direction = -1;
+          state.pauseUntil = now + 2000;
+        } else if (state.direction === -1 && container.scrollTop <= 0) {
+          state.direction = 1;
+          state.pauseUntil = now + 2000;
         }
       });
+
+      // 사라진 컨테이너의 리스너 정리
+      registered.forEach(container => {
+        if (!seen.has(container)) {
+          const state = trackedContainers.get(container);
+          if (state) {
+            container.removeEventListener('mouseenter', state.onEnter);
+            container.removeEventListener('mouseleave', state.onLeave);
+            trackedContainers.delete(container);
+          }
+          registered.delete(container);
+        }
+      });
+
       animationFrameId = requestAnimationFrame(scrollLoop);
     };
 
     animationFrameId = requestAnimationFrame(scrollLoop);
-    return () => cancelAnimationFrame(animationFrameId);
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      registered.forEach(container => {
+        const state = trackedContainers.get(container);
+        if (state) {
+          container.removeEventListener('mouseenter', state.onEnter);
+          container.removeEventListener('mouseleave', state.onLeave);
+        }
+      });
+    };
   }, []);
 
-  // 플로팅 컨트롤러 드래그 이벤트 등록
+  // 플로팅 컨트롤러 드래그 이벤트 등록 + 뷰포트 경계 clamp
   useEffect(() => {
+    const clampPos = (x, y) => {
+      // 컨트롤러는 bottom-6 right-6 기준이므로 translate 범위:
+      //   x: -(window.innerWidth - CTRL_WIDTH - 24) ~ +24 (대략)
+      //   y: -(window.innerHeight - CTRL_HEIGHT - 24) ~ +24
+      const maxX = 24;
+      const minX = -(window.innerWidth - CTRL_WIDTH - 24);
+      const maxY = 24;
+      const minY = -(window.innerHeight - CTRL_HEIGHT - 24);
+      return {
+        x: Math.min(maxX, Math.max(minX, x)),
+        y: Math.min(maxY, Math.max(minY, y)),
+      };
+    };
+
     const handleDragMove = (e) => {
       if (!isDraggingCtrl) return;
+      if (e.type.includes('touch')) e.preventDefault();
       const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
       const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
       
-      setCtrlPos({
-        x: clientX - dragStartOffset.current.x,
-        y: clientY - dragStartOffset.current.y
-      });
+      setCtrlPos(clampPos(
+        clientX - dragStartOffset.current.x,
+        clientY - dragStartOffset.current.y
+      ));
     };
 
     const handleDragEnd = () => {
@@ -369,6 +433,7 @@ export default function App() {
     }
   };
 
+  // 드래그 정렬: writeBatch로 원자성 + 비용 감소
   const handleDrop = async (e, targetPlan) => {
     e.preventDefault();
     e.stopPropagation();
@@ -387,11 +452,14 @@ export default function App() {
     newDayPlans.splice(targetIdx, 0, draggedPlan);
 
     try {
-      const updates = newDayPlans.map((plan, index) => {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', plan.id);
-        return updateDoc(docRef, { order: index });
+      const batch = writeBatch(db);
+      newDayPlans.forEach((plan, index) => {
+        if ((plan.order || 0) !== index) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', plan.id);
+          batch.update(docRef, { order: index });
+        }
       });
-      await Promise.all(updates);
+      await batch.commit();
     } catch (error) {
       console.error("Order update error:", error);
       setMessage({ type: 'error', text: '순서 변경 실패' });
@@ -410,6 +478,7 @@ export default function App() {
   const todayStr = getKSTDateString();
   const gridLayout = "grid-cols-5";
   const weeksCount = validWeeks.length;
+  const plansForSelectedDate = plans.filter(p => p.date === selectedDate);
 
   return (
     <div className="h-screen w-screen bg-slate-100 p-4 text-slate-800 font-sans selection:bg-blue-200 flex flex-col overflow-hidden">
@@ -484,6 +553,7 @@ export default function App() {
                           {p.title}
                         </span>
                         <button 
+                          type="button"
                           onClick={(e) => handleDelete(e, p.id)} 
                           className="opacity-0 group-hover/item:opacity-100 text-white/80 hover:text-white shrink-0 p-1.5 bg-black/25 rounded-md transition-opacity"
                         >
@@ -498,16 +568,16 @@ export default function App() {
           })}
         </div>
 
-        {/* 연/월 조작 플로팅 컨트롤러 - 드래그 기능 적용 */}
+        {/* 연/월 조작 플로팅 컨트롤러 - 드래그 기능 + 뷰포트 clamp */}
         <div 
           className={`absolute bottom-6 right-6 z-40 flex items-center bg-white text-slate-800 rounded-xl p-1.5 shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 select-none ${isDraggingCtrl ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ transform: `translate(${ctrlPos.x}px, ${ctrlPos.y}px)` }}
           onMouseDown={handleCtrlDragStart}
           onTouchStart={handleCtrlDragStart}
         >
-          <button onClick={prevMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800 cursor-pointer"><ChevronLeft size={36}/></button>
+          <button type="button" onClick={prevMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800 cursor-pointer"><ChevronLeft size={36}/></button>
           <span className="px-6 font-bold min-w-[220px] text-center text-3xl tracking-tighter pointer-events-none">{year}년 {month + 1}월</span>
-          <button onClick={nextMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800 cursor-pointer"><ChevronRight size={36}/></button>
+          <button type="button" onClick={nextMonth} className="p-3 hover:bg-slate-100 rounded-lg transition-all active:scale-95 text-slate-500 hover:text-slate-800 cursor-pointer"><ChevronRight size={36}/></button>
         </div>
       </div>
 
@@ -522,6 +592,7 @@ export default function App() {
                 {selectedDate} {editingPlanId ? '일정 수정' : '일정 등록'}
               </h3>
               <button 
+                type="button"
                 onClick={() => {
                   setIsModalOpen(false);
                   setEditingPlanId(null);
@@ -532,6 +603,32 @@ export default function App() {
               </button>
             </div>
             
+            {/* 등록 모드일 때 해당 날짜의 기존 일정 미리보기 */}
+            {!editingPlanId && plansForSelectedDate.length > 0 && (
+              <div className="px-8 pt-6">
+                <label className="text-lg font-bold text-slate-500 uppercase mb-3 block tracking-widest">이 날짜의 기존 일정</label>
+                <div className="space-y-2 max-h-40 overflow-y-auto cell-scroll">
+                  {plansForSelectedDate.map(p => (
+                    <div
+                      key={p.id}
+                      style={getThemeStyle(p.color)}
+                      className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg shadow-sm cursor-pointer hover:brightness-95"
+                      onClick={(e) => handlePlanClick(e, p)}
+                    >
+                      <span className="font-bold text-xl flex-1 truncate">{p.title}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDelete(e, p.id)}
+                        className="text-white/80 hover:text-white p-1 bg-black/20 rounded-md"
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSavePlan} className="p-8 space-y-8">
               <div>
                 <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
@@ -539,7 +636,7 @@ export default function App() {
                   {COLOR_THEMES.map(theme => (
                     <button
                       key={theme.id}
-                      입력="button"
+                      type="button"
                       onClick={() => setSelectedColor(theme.id)}
                       style={{ backgroundColor: theme.hex }}
                       className={`relative flex flex-col items-center justify-center p-3 rounded-xl transition-all ${selectedColor === theme.id ? 'ring-4 ring-blue-400 shadow-lg scale-105' : 'opacity-85 hover:opacity-100 shadow-sm'}`}
@@ -554,7 +651,7 @@ export default function App() {
               <div>
                 <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정명</label>
                 <input 
-                  입력="text" 
+                  type="text" 
                   placeholder="예: 1차 고사 시험 감독"
                   value={title}
                   autoFocus
@@ -577,7 +674,7 @@ export default function App() {
               
               <div className="flex gap-4 pt-4">
                 <button 
-                  입력="button" 
+                  type="button" 
                   onClick={() => {
                     setIsModalOpen(false);
                     setEditingPlanId(null);
@@ -586,7 +683,7 @@ export default function App() {
                 >
                   취소
                 </button>
-                <button 입력="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all">
+                <button type="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all">
                   {editingPlanId ? '수정하기' : '저장하기'}
                 </button>
               </div>
