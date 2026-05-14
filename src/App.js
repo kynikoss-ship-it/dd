@@ -139,11 +139,16 @@ export default function App() {
       if (!currentUser) setLoading(false); 
     });
 
-    // 5초 폴백: 인증 실패 시 무한 로딩 방지용 (에러 상태로 전환)
+    // 5초 폴백: 아직 로딩 중일 때만 에러로 전환 (정상 로딩 케이스 통과)
     const fallbackTimer = setTimeout(() => {
       if (cancelled) return;
-      setLoading(false);
-      setMessage({ type: 'error', text: '연결 지연. 새로고침을 시도해 주세요.' });
+      setLoading(prev => {
+        if (prev) {
+          setMessage({ type: 'error', text: '연결 지연. 새로고침을 시도해 주세요.' });
+          return false;
+        }
+        return prev;
+      });
     }, 5000);
 
     return () => {
