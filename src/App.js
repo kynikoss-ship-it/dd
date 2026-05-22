@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import { 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Check
 } from 'lucide-react';
@@ -7,7 +7,7 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch
+  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch, query, where
 } from 'firebase/firestore';
 
 // --- 환경 변수 에러 방지 및 설정 ---
@@ -28,7 +28,6 @@ try {
   console.error("Firebase Config Error:", e);
 }
 
-// 핫리로딩 환경 중복 초기화 방지
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -36,10 +35,7 @@ const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'monthl
 
 const getKSTDateString = (date = new Date()) => {
   const formatter = new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: 'Asia/Seoul'
+    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Seoul'
   });
   const parts = formatter.formatToParts(date);
   const y = parts.find(p => p.type === 'year').value;
@@ -52,7 +48,6 @@ const getMsToNextHalfDayKST = () => {
   const now = new Date();
   const utcNow = now.getTime() + (now.getTimezoneOffset() * 60000);
   const kstNow = new Date(utcNow + (9 * 3600000));
-
   const target = new Date(kstNow);
   if (kstNow.getHours() < 12) {
     target.setHours(12, 0, 0, 0); 
@@ -60,11 +55,9 @@ const getMsToNextHalfDayKST = () => {
     target.setDate(target.getDate() + 1);
     target.setHours(0, 0, 0, 0); 
   }
-
   return target.getTime() - kstNow.getTime() + 1000;
 };
 
-// 테마 색상 설정
 const COLOR_THEMES = [
   { id: 'red', hex: '#ef4444', label: '중요' },     
   { id: 'blue', hex: '#2563eb', label: '업무' },    
@@ -80,9 +73,74 @@ const getThemeStyle = (colorId) => {
   return { backgroundColor: theme.hex, color: '#ffffff' };
 };
 
-// 플로팅 컨트롤러 대략적인 크기 (clamp용)
 const CTRL_WIDTH = 360;
 const CTRL_HEIGHT = 70;
+
+// [PATCH] 범위 쿼리용 - 보고 있는 달 ±1개월 범위 문자열 반환
+const getQueryRange = (year, month) => {
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month + 2, 0);
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { start: fmt(startDate), end: fmt(endDate) };
+};
+
+// [PATCH] 일정 카드 컴포넌트 분리 + memo
+const PlanCard = memo(function PlanCard({ plan, onDragStart, onDragOver, onDrop, onClick, onDelete }) {
+  return (
+    <div 
+      draggable
+      onDragStart={(e) => onDragStart(e, plan)}
+      onDragOver={onDragOver}
+      onDrop={(e) => onDrop(e, plan)}
+      onClick={(e) => onClick(e, plan)}
+      style={getThemeStyle(plan.color)}
+      className="group/item flex items-center justify-between gap-2 py-3 px-3 rounded-lg transition-all shadow-md cursor-grab active:cursor-grabbing hover:brightness-95"
+    >
+      <span className="text-4xl font-extrabold break-all tracking-tight leading-snug flex-1 pointer-events-none drop-shadow-sm">
+        {plan.title}
+      </span>
+      <button 
+        type="button"
+        onClick={(e) => onDelete(e, plan.id)} 
+        className="opacity-0 group-hover/item:opacity-100 text-white/80 hover:text-white shrink-0 p-1.5 bg-black/25 rounded-md transition-opacity"
+      >
+        <X size={28} />
+      </button>
+    </div>
+  );
+});
+
+// [PATCH] 날짜 셀 컴포넌트 분리 + memo
+const DayCell = memo(function DayCell({ 
+  day, dateStr, isToday, dayPlans, onDateClick, 
+  onPlanDragStart, onPlanDragOver, onPlanDrop, onPlanClick, onPlanDelete 
+}) {
+  return (
+    <div 
+      onClick={() => onDateClick(dateStr)}
+      className="p-1.5 border-r border-b border-slate-200 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-blue-50/50"
+    >
+      <div className="flex justify-start items-start mb-1 shrink-0 px-1 pt-1">
+        <span className={`text-4xl font-bold ${isToday ? 'bg-blue-600 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-md' : 'text-slate-700'}`}>
+          {day}
+        </span>
+      </div>
+      <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll auto-scroll-container pb-1">
+        {dayPlans.map(p => (
+          <PlanCard
+            key={p.id}
+            plan={p}
+            onDragStart={onPlanDragStart}
+            onDragOver={onPlanDragOver}
+            onDrop={onPlanDrop}
+            onClick={onPlanClick}
+            onDelete={onPlanDelete}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -98,12 +156,10 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPlanId, setEditingPlanId] = useState(null);
 
-  // 컨트롤러 드래그 상태 관리
   const [ctrlPos, setCtrlPos] = useState({ x: 0, y: 0 });
   const [isDraggingCtrl, setIsDraggingCtrl] = useState(false);
   const dragStartOffset = useRef({ x: 0, y: 0 });
 
-  // 날짜 자동 갱신: 풀 리로드 대신 selectedDate만 새로고침
   useEffect(() => {
     let timerId;
     const scheduleNext = () => {
@@ -118,7 +174,6 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -139,7 +194,6 @@ export default function App() {
       if (!currentUser) setLoading(false); 
     });
 
-    // 5초 폴백: 아직 로딩 중일 때만 에러로 전환 (정상 로딩 케이스 통과)
     const fallbackTimer = setTimeout(() => {
       if (cancelled) return;
       setLoading(prev => {
@@ -158,14 +212,19 @@ export default function App() {
     };
   }, []);
 
+  // [PATCH 1] Firestore 쿼리에 날짜 범위 적용 - 전체 컬렉션 로드 방지
   useEffect(() => {
     if (!user) return;
 
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const { start, end } = getQueryRange(year, month);
+
     const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
+    const q = query(plansRef, where('date', '>=', start), where('date', '<=', end));
     
-    const unsubscribe = onSnapshot(plansRef, (snapshot) => {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // 날짜순, 이후 order 순으로 정렬
       data.sort((a, b) => {
         if (a.date > b.date) return 1;
         if (a.date < b.date) return -1;
@@ -179,60 +238,78 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, currentMonth]);
 
+  // [PATCH 2] 의존성을 message.text로 한정 - 객체 reference 변경 시마다 effect 재실행 방지
   useEffect(() => {
     if (message.text) {
       const timer = setTimeout(() => setMessage({ type: '', text: '' }), 3000);
       return () => clearTimeout(timer);
     }
-  }, [message]);
+  }, [message.text]);
 
-  // 자동 스크롤: 매 프레임 querySelectorAll 회피 + 리스너 누수 제거
+  // [PATCH 3] 자동 스크롤 - DOM 쿼리를 1초 간격으로 분리, rAF는 캐시만 사용
   useEffect(() => {
     let animationFrameId;
+    let refreshIntervalId;
     const scrollSpeed = 0.5;
-    const trackedContainers = new WeakMap(); // container -> { isHovered, direction, exactScroll, pauseUntil, onEnter, onLeave }
+    
+    // container -> state 매핑 (Map: 명시적 정리 가능)
+    const containerStates = new Map();
+    let activeContainers = [];
 
-    const ensureTracked = (container) => {
-      if (trackedContainers.has(container)) return trackedContainers.get(container);
-      const state = {
-        isHovered: false,
-        direction: 1,
-        exactScroll: 0,
-        pauseUntil: 0,
-      };
-      state.onEnter = () => { state.isHovered = true; };
-      state.onLeave = () => { state.isHovered = false; };
-      container.addEventListener('mouseenter', state.onEnter);
-      container.addEventListener('mouseleave', state.onLeave);
-      trackedContainers.set(container, state);
-      return state;
+    const refreshContainers = () => {
+      const found = document.querySelectorAll('.auto-scroll-container');
+      const foundSet = new Set(found);
+      
+      // 새 컨테이너 등록
+      foundSet.forEach(container => {
+        if (!containerStates.has(container)) {
+          const state = {
+            isHovered: false,
+            direction: 1,
+            exactScroll: 0,
+            pauseUntil: 0,
+          };
+          state.onEnter = () => { state.isHovered = true; };
+          state.onLeave = () => { state.isHovered = false; };
+          container.addEventListener('mouseenter', state.onEnter);
+          container.addEventListener('mouseleave', state.onLeave);
+          containerStates.set(container, state);
+        }
+      });
+
+      // 사라진 컨테이너 정리
+      containerStates.forEach((state, container) => {
+        if (!foundSet.has(container)) {
+          container.removeEventListener('mouseenter', state.onEnter);
+          container.removeEventListener('mouseleave', state.onLeave);
+          containerStates.delete(container);
+        }
+      });
+
+      activeContainers = Array.from(foundSet);
     };
 
-    let registered = new Set();
+    refreshContainers();
+    refreshIntervalId = setInterval(refreshContainers, 1000);
 
     const scrollLoop = () => {
-      const containers = document.querySelectorAll('.auto-scroll-container');
       const now = Date.now();
-      const seen = new Set();
-
-      containers.forEach(container => {
-        seen.add(container);
-        const state = ensureTracked(container);
-        registered.add(container);
+      for (let i = 0; i < activeContainers.length; i++) {
+        const container = activeContainers[i];
+        const state = containerStates.get(container);
+        if (!state) continue;
 
         if (state.isHovered) {
           state.exactScroll = container.scrollTop;
-          return;
+          continue;
         }
-        
         if (container.scrollHeight <= container.clientHeight) {
           container.scrollTop = 0;
-          return;
+          continue;
         }
-        
-        if (now < state.pauseUntil) return;
+        if (now < state.pauseUntil) continue;
 
         state.exactScroll += state.direction * scrollSpeed;
         container.scrollTop = state.exactScroll;
@@ -244,43 +321,26 @@ export default function App() {
           state.direction = 1;
           state.pauseUntil = now + 2000;
         }
-      });
-
-      // 사라진 컨테이너의 리스너 정리
-      registered.forEach(container => {
-        if (!seen.has(container)) {
-          const state = trackedContainers.get(container);
-          if (state) {
-            container.removeEventListener('mouseenter', state.onEnter);
-            container.removeEventListener('mouseleave', state.onLeave);
-            trackedContainers.delete(container);
-          }
-          registered.delete(container);
-        }
-      });
-
+      }
       animationFrameId = requestAnimationFrame(scrollLoop);
     };
 
     animationFrameId = requestAnimationFrame(scrollLoop);
+    
     return () => {
       cancelAnimationFrame(animationFrameId);
-      registered.forEach(container => {
-        const state = trackedContainers.get(container);
-        if (state) {
-          container.removeEventListener('mouseenter', state.onEnter);
-          container.removeEventListener('mouseleave', state.onLeave);
-        }
+      clearInterval(refreshIntervalId);
+      containerStates.forEach((state, container) => {
+        container.removeEventListener('mouseenter', state.onEnter);
+        container.removeEventListener('mouseleave', state.onLeave);
       });
+      containerStates.clear();
+      activeContainers = [];
     };
   }, []);
 
-  // 플로팅 컨트롤러 드래그 이벤트 등록 + 뷰포트 경계 clamp
   useEffect(() => {
     const clampPos = (x, y) => {
-      // 컨트롤러는 bottom-6 right-6 기준이므로 translate 범위:
-      //   x: -(window.innerWidth - CTRL_WIDTH - 24) ~ +24 (대략)
-      //   y: -(window.innerHeight - CTRL_HEIGHT - 24) ~ +24
       const maxX = 24;
       const minX = -(window.innerWidth - CTRL_WIDTH - 24);
       const maxY = 24;
@@ -296,16 +356,13 @@ export default function App() {
       if (e.type.includes('touch')) e.preventDefault();
       const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
       const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
-      
       setCtrlPos(clampPos(
         clientX - dragStartOffset.current.x,
         clientY - dragStartOffset.current.y
       ));
     };
 
-    const handleDragEnd = () => {
-      setIsDraggingCtrl(false);
-    };
+    const handleDragEnd = () => setIsDraggingCtrl(false);
 
     if (isDraggingCtrl) {
       window.addEventListener('mousemove', handleDragMove);
@@ -326,59 +383,63 @@ export default function App() {
   const month = currentMonth.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayIndex = new Date(year, month, 1).getDay(); 
+
+  // [PATCH 4] plans를 날짜별 Map으로 1회 변환 - 셀마다 filter 호출 O(N×D) → O(N+D)
+  const plansByDate = useMemo(() => {
+    const map = new Map();
+    for (const p of plans) {
+      if (!map.has(p.date)) map.set(p.date, []);
+      map.get(p.date).push(p);
+    }
+    return map;
+  }, [plans]);
   
   const calendarDays = useMemo(() => {
     const days = [];
     for (let i = 0; i < firstDayIndex; i++) days.push(null);
     for (let i = 1; i <= daysInMonth; i++) days.push(i);
-    
     const remainder = days.length % 7;
     if (remainder !== 0) {
       for (let i = 0; i < 7 - remainder; i++) days.push(null);
     }
-    
     return days;
-  }, [year, month, daysInMonth, firstDayIndex]);
+  }, [daysInMonth, firstDayIndex]);
 
   const validWeeks = useMemo(() => {
     const weeks = [];
     for (let i = 0; i < calendarDays.length; i += 7) {
       const week = calendarDays.slice(i, i + 7);
       const hasWeekday = week.slice(1, 6).some(day => day !== null);
-      if (hasWeekday) {
-        weeks.push(week);
-      }
+      if (hasWeekday) weeks.push(week);
     }
     return weeks;
   }, [calendarDays]);
 
-  const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
-  const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
+  const prevMonth = useCallback(() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)), []);
+  const nextMonth = useCallback(() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)), []);
 
   const handleCtrlDragStart = (e) => {
-    // 내부 버튼 클릭 시 드래그 동작 무시
     if (e.target.closest('button')) return;
-    
     setIsDraggingCtrl(true);
     const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
     const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
-    
     dragStartOffset.current = {
       x: clientX - ctrlPos.x,
       y: clientY - ctrlPos.y
     };
   };
 
-  const handleDateClick = (dateStr) => {
+  // [PATCH 5] 핸들러들을 useCallback으로 안정화 - memo 컴포넌트의 리렌더 방지
+  const handleDateClick = useCallback((dateStr) => {
     setEditingPlanId(null);
     setSelectedDate(dateStr);
     setTitle('');
     setDescription('');
     setSelectedColor('green'); 
     setIsModalOpen(true);
-  };
+  }, []);
 
-  const handlePlanClick = (e, plan) => {
+  const handlePlanClick = useCallback((e, plan) => {
     e.stopPropagation();
     setEditingPlanId(plan.id);
     setSelectedDate(plan.date);
@@ -386,48 +447,9 @@ export default function App() {
     setDescription(plan.description || '');
     setSelectedColor(plan.color || 'green');
     setIsModalOpen(true);
-  };
+  }, []);
 
-  const handleSavePlan = async (e) => {
-    e.preventDefault();
-    if (!user || !title.trim()) return;
-
-    try {
-      if (editingPlanId) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', editingPlanId);
-        await updateDoc(docRef, {
-          title,
-          description,
-          color: selectedColor
-        });
-        setMessage({ type: 'success', text: '일정이 수정되었습니다.' });
-      } else {
-        const dayPlans = plans.filter(p => p.date === selectedDate);
-        const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
-
-        const plansRef = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
-        await addDoc(plansRef, {
-          date: selectedDate,
-          title,
-          description,
-          color: selectedColor,
-          order: nextOrder,
-          createdAt: serverTimestamp(),
-          userId: user.uid
-        });
-        setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
-      }
-      
-      setTitle('');
-      setDescription('');
-      setEditingPlanId(null);
-      setIsModalOpen(false);
-    } catch (error) {
-      setMessage({ type: 'error', text: '저장 실패' });
-    }
-  };
-
-  const handleDelete = async (e, id) => {
+  const handleDelete = useCallback(async (e, id) => {
     e.stopPropagation();
     try {
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', id);
@@ -436,19 +458,33 @@ export default function App() {
     } catch (error) {
       setMessage({ type: 'error', text: '삭제 실패' });
     }
-  };
+  }, []);
 
-  // 드래그 정렬: writeBatch로 원자성 + 비용 감소
-  const handleDrop = async (e, targetPlan) => {
+  const handlePlanDragStart = useCallback((e, plan) => {
+    e.dataTransfer.setData('text/plain', plan.id);
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handlePlanDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  // plansRef를 ref로 보관 - handleDrop이 plans 변경마다 새로 만들어지지 않도록
+  const plansRef = useRef(plans);
+  useEffect(() => { plansRef.current = plans; }, [plans]);
+
+  const handleDrop = useCallback(async (e, targetPlan) => {
     e.preventDefault();
     e.stopPropagation();
     const draggedId = e.dataTransfer.getData('text/plain');
     if (!draggedId || draggedId === targetPlan.id) return;
 
-    const draggedPlan = plans.find(p => p.id === draggedId);
+    const currentPlans = plansRef.current;
+    const draggedPlan = currentPlans.find(p => p.id === draggedId);
     if (!draggedPlan || draggedPlan.date !== targetPlan.date) return;
 
-    const dayPlans = plans.filter(p => p.date === targetPlan.date).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const dayPlans = currentPlans.filter(p => p.date === targetPlan.date).sort((a, b) => (a.order || 0) - (b.order || 0));
     const draggedIdx = dayPlans.findIndex(p => p.id === draggedId);
     const targetIdx = dayPlans.findIndex(p => p.id === targetPlan.id);
 
@@ -469,6 +505,34 @@ export default function App() {
       console.error("Order update error:", error);
       setMessage({ type: 'error', text: '순서 변경 실패' });
     }
+  }, []);
+
+  const handleSavePlan = async (e) => {
+    e.preventDefault();
+    if (!user || !title.trim()) return;
+
+    try {
+      if (editingPlanId) {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', editingPlanId);
+        await updateDoc(docRef, { title, description, color: selectedColor });
+        setMessage({ type: 'success', text: '일정이 수정되었습니다.' });
+      } else {
+        const dayPlans = plans.filter(p => p.date === selectedDate);
+        const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
+        const ref = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
+        await addDoc(ref, {
+          date: selectedDate, title, description, color: selectedColor,
+          order: nextOrder, createdAt: serverTimestamp(), userId: user.uid
+        });
+        setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
+      }
+      setTitle('');
+      setDescription('');
+      setEditingPlanId(null);
+      setIsModalOpen(false);
+    } catch (error) {
+      setMessage({ type: 'error', text: '저장 실패' });
+    }
   };
 
   if (loading) {
@@ -483,11 +547,10 @@ export default function App() {
   const todayStr = getKSTDateString();
   const gridLayout = "grid-cols-5";
   const weeksCount = validWeeks.length;
-  const plansForSelectedDate = plans.filter(p => p.date === selectedDate);
+  const plansForSelectedDate = plansByDate.get(selectedDate) || [];
 
   return (
     <div className="h-screen w-screen bg-slate-100 p-4 text-slate-800 font-sans selection:bg-blue-200 flex flex-col overflow-hidden">
-      
       <style>{`
         .cell-scroll::-webkit-scrollbar { width: 6px; }
         .cell-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -512,68 +575,36 @@ export default function App() {
             </div>
           ))}
 
-          {validWeeks.flatMap((week, weekIdx) => {
-            return week.map((day, idx) => {
+          {validWeeks.flatMap((week, weekIdx) => 
+            week.map((day, idx) => {
               if (idx === 0 || idx === 6) return null; 
-
               if (day === null) {
-                return <div key={`empty-${weekIdx}-${idx}`} className={`border-r border-b border-slate-200 bg-slate-50/50`}></div>;
+                return <div key={`empty-${weekIdx}-${idx}`} className="border-r border-b border-slate-200 bg-slate-50/50"></div>;
               }
               
               const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const dayPlans = plans.filter(p => p.date === dateStr);
+              const dayPlans = plansByDate.get(dateStr) || [];
               const isToday = todayStr === dateStr;
 
               return (
-                <div 
-                  key={day} 
-                  onClick={() => handleDateClick(dateStr)}
-                  className="p-1.5 border-r border-b border-slate-200 group cursor-pointer transition-all relative flex flex-col overflow-hidden bg-white hover:bg-blue-50/50"
-                >
-                  <div className="flex justify-start items-start mb-1 shrink-0 px-1 pt-1">
-                    <span className={`text-4xl font-bold ${isToday ? 'bg-blue-600 text-white w-14 h-14 flex items-center justify-center rounded-full shadow-md' : 'text-slate-700'}`}>
-                      {day}
-                    </span>
-                  </div>
-                  
-                  <div className="flex-1 space-y-2 mt-1 overflow-y-auto cell-scroll auto-scroll-container pb-1">
-                    {dayPlans.map(p => (
-                      <div 
-                        key={p.id} 
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', p.id);
-                          e.dataTransfer.effectAllowed = 'move';
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.dataTransfer.dropEffect = 'move';
-                        }}
-                        onDrop={(e) => handleDrop(e, p)}
-                        onClick={(e) => handlePlanClick(e, p)}
-                        style={getThemeStyle(p.color)}
-                        className="group/item flex items-center justify-between gap-2 py-3 px-3 rounded-lg transition-all shadow-md cursor-grab active:cursor-grabbing hover:brightness-95"
-                      >
-                        <span className="text-4xl font-extrabold break-all tracking-tight leading-snug flex-1 pointer-events-none drop-shadow-sm">
-                          {p.title}
-                        </span>
-                        <button 
-                          type="button"
-                          onClick={(e) => handleDelete(e, p.id)} 
-                          className="opacity-0 group-hover/item:opacity-100 text-white/80 hover:text-white shrink-0 p-1.5 bg-black/25 rounded-md transition-opacity"
-                        >
-                          <X size={28} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <DayCell
+                  key={`${year}-${month}-${day}`}
+                  day={day}
+                  dateStr={dateStr}
+                  isToday={isToday}
+                  dayPlans={dayPlans}
+                  onDateClick={handleDateClick}
+                  onPlanDragStart={handlePlanDragStart}
+                  onPlanDragOver={handlePlanDragOver}
+                  onPlanDrop={handleDrop}
+                  onPlanClick={handlePlanClick}
+                  onPlanDelete={handleDelete}
+                />
               );
-            });
-          })}
+            })
+          )}
         </div>
 
-        {/* 연/월 조작 플로팅 컨트롤러 - 드래그 기능 + 뷰포트 clamp */}
         <div 
           className={`absolute bottom-6 right-6 z-40 flex items-center bg-white text-slate-800 rounded-xl p-1.5 shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 select-none ${isDraggingCtrl ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ transform: `translate(${ctrlPos.x}px, ${ctrlPos.y}px)` }}
@@ -608,7 +639,6 @@ export default function App() {
               </button>
             </div>
             
-            {/* 등록 모드일 때 해당 날짜의 기존 일정 미리보기 */}
             {!editingPlanId && plansForSelectedDate.length > 0 && (
               <div className="px-8 pt-6">
                 <label className="text-lg font-bold text-slate-500 uppercase mb-3 block tracking-widest">이 날짜의 기존 일정</label>
