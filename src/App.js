@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import { 
-  Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Check
+  Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Check, Lock, Download, Paperclip, Edit2, Trash2
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
@@ -10,7 +10,6 @@ import {
   getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch, query, where
 } from 'firebase/firestore';
 
-// --- 환경 변수 에러 방지 및 설정 ---
 let firebaseConfig = {
   apiKey: "AIzaSyCO3bou4eMc-b4npOT99knhwBn_AAt2Kjc",
   authDomain: "monthly-planner-560a3.firebaseapp.com",
@@ -76,7 +75,6 @@ const getThemeStyle = (colorId) => {
 const CTRL_WIDTH = 360;
 const CTRL_HEIGHT = 70;
 
-// [PATCH] 범위 쿼리용 - 보고 있는 달 ±1개월 범위 문자열 반환
 const getQueryRange = (year, month) => {
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month + 2, 0);
@@ -84,8 +82,12 @@ const getQueryRange = (year, month) => {
   return { start: fmt(startDate), end: fmt(endDate) };
 };
 
-// [PATCH] 일정 카드 컴포넌트 분리 + memo
-const PlanCard = memo(function PlanCard({ plan, onDragStart, onDragOver, onDrop, onClick, onDelete }) {
+const PlanCard = memo(function PlanCard({ plan, onDragStart, onDragOver, onDrop, onClick, onDelete, requireAuth }) {
+  const handleDeleteClick = (e) => {
+    e.stopPropagation();
+    requireAuth(() => onDelete(e, plan.id));
+  };
+
   return (
     <div 
       draggable
@@ -96,12 +98,13 @@ const PlanCard = memo(function PlanCard({ plan, onDragStart, onDragOver, onDrop,
       style={getThemeStyle(plan.color)}
       className="group/item flex items-center justify-between gap-2 py-3 px-3 rounded-lg transition-all shadow-md cursor-grab active:cursor-grabbing hover:brightness-95"
     >
-      <span className="text-4xl font-extrabold break-all tracking-tight leading-snug flex-1 pointer-events-none drop-shadow-sm">
+      <span className="text-4xl font-extrabold break-all tracking-tight leading-snug flex-1 pointer-events-none drop-shadow-sm flex items-center gap-2">
         {plan.title}
+        {plan.attachment && <Paperclip size={20} className="inline-block opacity-80" />}
       </span>
       <button 
         type="button"
-        onClick={(e) => onDelete(e, plan.id)} 
+        onClick={handleDeleteClick} 
         className="opacity-0 group-hover/item:opacity-100 text-white/80 hover:text-white shrink-0 p-1.5 bg-black/25 rounded-md transition-opacity"
       >
         <X size={28} />
@@ -110,10 +113,9 @@ const PlanCard = memo(function PlanCard({ plan, onDragStart, onDragOver, onDrop,
   );
 });
 
-// [PATCH] 날짜 셀 컴포넌트 분리 + memo
 const DayCell = memo(function DayCell({ 
   day, dateStr, isToday, dayPlans, onDateClick, 
-  onPlanDragStart, onPlanDragOver, onPlanDrop, onPlanClick, onPlanDelete 
+  onPlanDragStart, onPlanDragOver, onPlanDrop, onPlanClick, onPlanDelete, requireAuth
 }) {
   return (
     <div 
@@ -135,6 +137,7 @@ const DayCell = memo(function DayCell({
             onDrop={onPlanDrop}
             onClick={onPlanClick}
             onDelete={onPlanDelete}
+            requireAuth={requireAuth}
           />
         ))}
       </div>
@@ -153,8 +156,16 @@ export default function App() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState('green');
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [attachment, setAttachment] = useState(null);
+  
+  const [modalMode, setModalMode] = useState('none'); // 'none', 'detail', 'form'
   const [editingPlanId, setEditingPlanId] = useState(null);
+
+  // Auth States
+  const isVerifiedRef = useRef(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [pendingAction, setPendingAction] = useState(null);
 
   const [ctrlPos, setCtrlPos] = useState({ x: 0, y: 0 });
   const [isDraggingCtrl, setIsDraggingCtrl] = useState(false);
@@ -164,13 +175,15 @@ export default function App() {
     let timerId;
     const scheduleNext = () => {
       timerId = setTimeout(() => {
-        setSelectedDate(getKSTDateString());
+        if (modalMode === 'none') {
+          setSelectedDate(getKSTDateString());
+        }
         scheduleNext();
       }, getMsToNextHalfDayKST());
     };
     scheduleNext();
     return () => clearTimeout(timerId);
-  }, []);
+  }, [modalMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,7 +225,6 @@ export default function App() {
     };
   }, []);
 
-  // [PATCH 1] Firestore 쿼리에 날짜 범위 적용 - 전체 컬렉션 로드 방지
   useEffect(() => {
     if (!user) return;
 
@@ -240,7 +252,6 @@ export default function App() {
     return () => unsubscribe();
   }, [user, currentMonth]);
 
-  // [PATCH 2] 의존성을 message.text로 한정 - 객체 reference 변경 시마다 effect 재실행 방지
   useEffect(() => {
     if (message.text) {
       const timer = setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -248,13 +259,10 @@ export default function App() {
     }
   }, [message.text]);
 
-  // [PATCH 3] 자동 스크롤 - DOM 쿼리를 1초 간격으로 분리, rAF는 캐시만 사용
   useEffect(() => {
     let animationFrameId;
     let refreshIntervalId;
     const scrollSpeed = 0.5;
-    
-    // container -> state 매핑 (Map: 명시적 정리 가능)
     const containerStates = new Map();
     let activeContainers = [];
 
@@ -262,15 +270,9 @@ export default function App() {
       const found = document.querySelectorAll('.auto-scroll-container');
       const foundSet = new Set(found);
       
-      // 새 컨테이너 등록
       foundSet.forEach(container => {
         if (!containerStates.has(container)) {
-          const state = {
-            isHovered: false,
-            direction: 1,
-            exactScroll: 0,
-            pauseUntil: 0,
-          };
+          const state = { isHovered: false, direction: 1, exactScroll: 0, pauseUntil: 0 };
           state.onEnter = () => { state.isHovered = true; };
           state.onLeave = () => { state.isHovered = false; };
           container.addEventListener('mouseenter', state.onEnter);
@@ -279,7 +281,6 @@ export default function App() {
         }
       });
 
-      // 사라진 컨테이너 정리
       containerStates.forEach((state, container) => {
         if (!foundSet.has(container)) {
           container.removeEventListener('mouseenter', state.onEnter);
@@ -384,7 +385,6 @@ export default function App() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayIndex = new Date(year, month, 1).getDay(); 
 
-  // [PATCH 4] plans를 날짜별 Map으로 1회 변환 - 셀마다 filter 호출 O(N×D) → O(N+D)
   const plansByDate = useMemo(() => {
     const map = new Map();
     for (const p of plans) {
@@ -429,15 +429,42 @@ export default function App() {
     };
   };
 
-  // [PATCH 5] 핸들러들을 useCallback으로 안정화 - memo 컴포넌트의 리렌더 방지
-  const handleDateClick = useCallback((dateStr) => {
-    setEditingPlanId(null);
-    setSelectedDate(dateStr);
-    setTitle('');
-    setDescription('');
-    setSelectedColor('green'); 
-    setIsModalOpen(true);
+  // Auth Functions
+  const requireAuth = useCallback((action) => {
+    if (isVerifiedRef.current) {
+      action();
+    } else {
+      setPendingAction(() => action);
+      setIsPasswordModalOpen(true);
+      setPasswordInput('');
+    }
   }, []);
+
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault();
+    if (passwordInput === '3328') {
+      isVerifiedRef.current = true;
+      setIsPasswordModalOpen(false);
+      if (pendingAction) {
+        pendingAction();
+        setPendingAction(null);
+      }
+    } else {
+      setMessage({ type: 'error', text: '비밀번호가 일치하지 않습니다.' });
+    }
+  };
+
+  const handleDateClick = useCallback((dateStr) => {
+    requireAuth(() => {
+      setEditingPlanId(null);
+      setSelectedDate(dateStr);
+      setTitle('');
+      setDescription('');
+      setSelectedColor('green'); 
+      setAttachment(null);
+      setModalMode('form');
+    });
+  }, [requireAuth]);
 
   const handlePlanClick = useCallback((e, plan) => {
     e.stopPropagation();
@@ -446,37 +473,45 @@ export default function App() {
     setTitle(plan.title);
     setDescription(plan.description || '');
     setSelectedColor(plan.color || 'green');
-    setIsModalOpen(true);
+    setAttachment(plan.attachment || null);
+    setModalMode('detail');
   }, []);
 
   const handleDelete = useCallback(async (e, id) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     try {
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', id);
       await deleteDoc(docRef);
       setMessage({ type: 'success', text: '삭제되었습니다.' });
+      setModalMode('none');
     } catch (error) {
       setMessage({ type: 'error', text: '삭제 실패' });
     }
   }, []);
 
   const handlePlanDragStart = useCallback((e, plan) => {
+    if (!isVerifiedRef.current) {
+      e.preventDefault();
+      requireAuth(() => {});
+      return;
+    }
     e.dataTransfer.setData('text/plain', plan.id);
     e.dataTransfer.effectAllowed = 'move';
-  }, []);
+  }, [requireAuth]);
 
   const handlePlanDragOver = useCallback((e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   }, []);
 
-  // plansRef를 ref로 보관 - handleDrop이 plans 변경마다 새로 만들어지지 않도록
   const plansRef = useRef(plans);
   useEffect(() => { plansRef.current = plans; }, [plans]);
 
   const handleDrop = useCallback(async (e, targetPlan) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!isVerifiedRef.current) return;
+
     const draggedId = e.dataTransfer.getData('text/plain');
     if (!draggedId || draggedId === targetPlan.id) return;
 
@@ -507,29 +542,48 @@ export default function App() {
     }
   }, []);
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 500 * 1024) {
+      setMessage({ type: 'error', text: '첨부파일은 500KB 이하만 가능합니다.' });
+      e.target.value = ''; 
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAttachment({ name: file.name, data: reader.result });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSavePlan = async (e) => {
     e.preventDefault();
     if (!user || !title.trim()) return;
 
     try {
+      const payload = { title, description, color: selectedColor, attachment };
+      
       if (editingPlanId) {
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'monthly_plans', editingPlanId);
-        await updateDoc(docRef, { title, description, color: selectedColor });
+        await updateDoc(docRef, payload);
         setMessage({ type: 'success', text: '일정이 수정되었습니다.' });
       } else {
         const dayPlans = plans.filter(p => p.date === selectedDate);
         const nextOrder = dayPlans.length > 0 ? Math.max(...dayPlans.map(p => p.order || 0)) + 1 : 0;
         const ref = collection(db, 'artifacts', appId, 'public', 'data', 'monthly_plans');
         await addDoc(ref, {
-          date: selectedDate, title, description, color: selectedColor,
-          order: nextOrder, createdAt: serverTimestamp(), userId: user.uid
+          date: selectedDate, 
+          ...payload,
+          order: nextOrder, 
+          createdAt: serverTimestamp(), 
+          userId: user.uid
         });
         setMessage({ type: 'success', text: '일정이 등록되었습니다.' });
       }
-      setTitle('');
-      setDescription('');
-      setEditingPlanId(null);
-      setIsModalOpen(false);
+      setModalMode('none');
     } catch (error) {
       setMessage({ type: 'error', text: '저장 실패' });
     }
@@ -599,6 +653,7 @@ export default function App() {
                   onPlanDrop={handleDrop}
                   onPlanClick={handlePlanClick}
                   onPlanDelete={handleDelete}
+                  requireAuth={requireAuth}
                 />
               );
             })
@@ -617,7 +672,7 @@ export default function App() {
         </div>
       </div>
 
-      {isModalOpen && (
+      {modalMode !== 'none' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-2xl rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
@@ -625,101 +680,223 @@ export default function App() {
                 <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-md">
                   <CalendarIcon size={28} />
                 </div>
-                {selectedDate} {editingPlanId ? '일정 수정' : '일정 등록'}
+                {selectedDate} {modalMode === 'detail' ? '일정 개요' : (editingPlanId ? '일정 수정' : '일정 등록')}
               </h3>
               <button 
                 type="button"
-                onClick={() => {
-                  setIsModalOpen(false);
-                  setEditingPlanId(null);
-                }} 
+                onClick={() => setModalMode('none')} 
                 className="p-3 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors"
               >
                 <X size={36} />
               </button>
             </div>
             
-            {!editingPlanId && plansForSelectedDate.length > 0 && (
-              <div className="px-8 pt-6">
-                <label className="text-lg font-bold text-slate-500 uppercase mb-3 block tracking-widest">이 날짜의 기존 일정</label>
-                <div className="space-y-2 max-h-40 overflow-y-auto cell-scroll">
-                  {plansForSelectedDate.map(p => (
-                    <div
-                      key={p.id}
-                      style={getThemeStyle(p.color)}
-                      className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg shadow-sm cursor-pointer hover:brightness-95"
-                      onClick={(e) => handlePlanClick(e, p)}
+            {modalMode === 'detail' && (
+              <div className="p-8 space-y-8">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span 
+                      style={getThemeStyle(selectedColor)} 
+                      className="px-3 py-1 rounded-md text-sm font-bold shadow-sm"
                     >
-                      <span className="font-bold text-xl flex-1 truncate">{p.title}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDelete(e, p.id)}
-                        className="text-white/80 hover:text-white p-1 bg-black/20 rounded-md"
-                      >
-                        <X size={20} />
-                      </button>
-                    </div>
-                  ))}
+                      {COLOR_THEMES.find(t => t.id === selectedColor)?.label || '기본'}
+                    </span>
+                  </div>
+                  <h4 className="text-4xl font-extrabold text-slate-900">{title}</h4>
+                </div>
+                
+                <div>
+                  <label className="text-lg font-bold text-slate-500 uppercase mb-3 block tracking-widest">세부 운영계획</label>
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-2xl font-semibold text-slate-700 whitespace-pre-wrap min-h-[120px]">
+                    {description || '작성된 내용이 없습니다.'}
+                  </div>
+                </div>
+
+                {attachment && (
+                  <div>
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-3 block tracking-widest">첨부파일</label>
+                    <a 
+                      href={attachment.data} 
+                      download={attachment.name}
+                      className="flex items-center justify-between bg-blue-50 hover:bg-blue-100 p-4 rounded-xl border border-blue-200 transition-colors"
+                    >
+                      <span className="flex items-center gap-3 text-blue-800 font-bold text-xl truncate">
+                        <Download size={24} /> {attachment.name}
+                      </span>
+                    </a>
+                  </div>
+                )}
+
+                <div className="flex gap-4 pt-6 border-t border-slate-100">
+                  <button 
+                    onClick={() => requireAuth(() => setModalMode('form'))}
+                    className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-2xl transition-colors flex justify-center items-center gap-2"
+                  >
+                    <Edit2 size={24} /> 수정하기
+                  </button>
+                  <button 
+                    onClick={(e) => requireAuth(() => handleDelete(e, editingPlanId))}
+                    className="flex-1 py-4 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-bold text-2xl transition-colors flex justify-center items-center gap-2"
+                  >
+                    <Trash2 size={24} /> 삭제하기
+                  </button>
                 </div>
               </div>
             )}
 
-            <form onSubmit={handleSavePlan} className="p-8 space-y-8">
-              <div>
-                <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
-                <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-                  {COLOR_THEMES.map(theme => (
-                    <button
-                      key={theme.id}
-                      type="button"
-                      onClick={() => setSelectedColor(theme.id)}
-                      style={{ backgroundColor: theme.hex }}
-                      className={`relative flex flex-col items-center justify-center p-3 rounded-xl transition-all ${selectedColor === theme.id ? 'ring-4 ring-blue-400 shadow-lg scale-105' : 'opacity-85 hover:opacity-100 shadow-sm'}`}
-                    >
-                      {selectedColor === theme.id && <Check size={20} className="text-white absolute top-1 right-1" />}
-                      <span className="text-white font-semibold text-base mt-1">{theme.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+            {modalMode === 'form' && (
+              <>
+                {!editingPlanId && plansForSelectedDate.length > 0 && (
+                  <div className="px-8 pt-6">
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-3 block tracking-widest">이 날짜의 기존 일정</label>
+                    <div className="space-y-2 max-h-40 overflow-y-auto cell-scroll">
+                      {plansForSelectedDate.map(p => (
+                        <div
+                          key={p.id}
+                          style={getThemeStyle(p.color)}
+                          className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg shadow-sm cursor-pointer hover:brightness-95"
+                          onClick={(e) => handlePlanClick(e, p)}
+                        >
+                          <span className="font-bold text-xl flex-1 truncate">{p.title}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              requireAuth(() => handleDelete(e, p.id));
+                            }}
+                            className="text-white/80 hover:text-white p-1 bg-black/20 rounded-md"
+                          >
+                            <X size={20} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-              <div>
-                <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정명</label>
-                <input 
-                  type="text" 
-                  placeholder="예: 1차 고사 시험 감독"
-                  value={title}
-                  autoFocus
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full p-5 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-50 outline-none font-bold text-3xl text-slate-800 transition-all placeholder:text-slate-300"
-                  required
-                />
+                <form onSubmit={handleSavePlan} className="p-8 space-y-8">
+                  <div>
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
+                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                      {COLOR_THEMES.map(theme => (
+                        <button
+                          key={theme.id}
+                          type="button"
+                          onClick={() => setSelectedColor(theme.id)}
+                          style={{ backgroundColor: theme.hex }}
+                          className={`relative flex flex-col items-center justify-center p-3 rounded-xl transition-all ${selectedColor === theme.id ? 'ring-4 ring-blue-400 shadow-lg scale-105' : 'opacity-85 hover:opacity-100 shadow-sm'}`}
+                        >
+                          {selectedColor === theme.id && <Check size={20} className="text-white absolute top-1 right-1" />}
+                          <span className="text-white font-semibold text-base mt-1">{theme.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정명</label>
+                    <input 
+                      type="text" 
+                      placeholder="예: 1차 고사 시험 감독"
+                      value={title}
+                      autoFocus
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full p-5 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-50 outline-none font-bold text-3xl text-slate-800 transition-all placeholder:text-slate-300"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">세부 사항</label>
+                    <textarea 
+                      rows="2"
+                      placeholder="추가 메모 및 세부 운영계획"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="w-full p-5 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-50 outline-none font-semibold text-2xl text-slate-800 resize-none transition-all placeholder:text-slate-300"
+                    ></textarea>
+                  </div>
+
+                  <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">첨부파일 (최대 500KB)</label>
+                    <div className="flex items-center gap-4">
+                      <input 
+                        type="file" 
+                        id="file-upload"
+                        className="hidden"
+                        onChange={handleFileUpload}
+                      />
+                      <label htmlFor="file-upload" className="cursor-pointer bg-white border-2 border-slate-300 px-6 py-3 rounded-xl font-bold text-xl hover:bg-slate-100 transition-colors text-slate-700">
+                        파일 선택
+                      </label>
+                      <span className="text-xl font-semibold text-slate-600 truncate max-w-[200px] md:max-w-[300px]">
+                        {attachment ? attachment.name : '선택된 파일 없음'}
+                      </span>
+                    </div>
+                    {attachment && (
+                      <button 
+                        type="button" 
+                        onClick={() => setAttachment(null)}
+                        className="text-red-500 text-lg font-bold hover:underline mt-3 inline-block"
+                      >
+                        첨부파일 삭제
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-4 pt-4">
+                    <button 
+                      type="button" 
+                      onClick={() => setModalMode('none')} 
+                      className="flex-1 py-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-2xl transition-colors"
+                    >
+                      취소
+                    </button>
+                    <button type="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all">
+                      {editingPlanId ? '수정하기' : '저장하기'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isPasswordModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-8 shadow-2xl relative overflow-hidden animate-in zoom-in duration-200">
+            <div className="absolute top-0 left-0 w-full h-2 bg-blue-500"></div>
+            <div className="flex flex-col items-center text-center space-y-4 mb-6">
+              <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-2">
+                <Lock size={32} />
               </div>
-              
-              <div>
-                <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">세부 사항</label>
-                <textarea 
-                  rows="2"
-                  placeholder="추가 메모"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full p-5 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-50 outline-none font-semibold text-2xl text-slate-800 resize-none transition-all placeholder:text-slate-300"
-                ></textarea>
-              </div>
-              
-              <div className="flex gap-4 pt-4">
+              <h2 className="text-3xl font-bold text-gray-900">관리자 인증</h2>
+              <p className="text-gray-500 text-lg font-semibold">편집을 위해 비밀번호를 입력해주세요.</p>
+            </div>
+
+            <form onSubmit={handlePasswordSubmit}>
+              <input 
+                type="password" 
+                autoFocus
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-xl p-5 text-center text-3xl tracking-widest focus:border-blue-500 focus:ring-0 outline-none mb-6 transition-colors font-mono"
+                placeholder="****"
+              />
+              <div className="flex gap-3">
                 <button 
                   type="button" 
-                  onClick={() => {
-                    setIsModalOpen(false);
-                    setEditingPlanId(null);
-                  }} 
-                  className="flex-1 py-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-2xl transition-colors"
+                  onClick={() => setIsPasswordModalOpen(false)}
+                  className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-bold text-xl transition-colors"
                 >
                   취소
                 </button>
-                <button type="submit" className="flex-[2] py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all">
-                  {editingPlanId ? '수정하기' : '저장하기'}
+                <button 
+                  type="submit"
+                  className="flex-1 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-xl transition-colors shadow-md shadow-blue-200"
+                >
+                  확인
                 </button>
               </div>
             </form>
