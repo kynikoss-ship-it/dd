@@ -58,14 +58,17 @@ const getMsToNextHalfDayKST = () => {
 };
 
 const COLOR_THEMES = [
-  { id: 'red', hex: '#ef4444', label: '중요' },     
-  { id: 'blue', hex: '#2563eb', label: '업무' },    
-  { id: 'purple', hex: '#a855f7', label: '평가/시험' },  
-  { id: 'orange', hex: '#f59e0b', label: '행사/일정' },  
-  { id: 'green', hex: '#10b981', label: '기본' },     
+  { id: 'red', hex: '#ef4444', label: '미래교무부' },
+  { id: 'orange', hex: '#f97316', label: '교육과정부' },
+  { id: 'yellow', hex: '#eab308', label: '교육연구부' },
+  { id: 'green', hex: '#10b981', label: '인문사회부' },
+  { id: 'blue', hex: '#2563eb', label: '인성안전부' },
+  { id: 'navy', hex: '#3730a3', label: '진로환경부' },
+  { id: 'purple', hex: '#a855f7', label: '체육보건부' },
+  { id: 'brown', hex: '#92400e', label: '창의정보부' },
 ];
 
-const DEFAULT_THEME = COLOR_THEMES.find(t => t.id === 'green') ?? COLOR_THEMES[0];
+const DEFAULT_THEME = COLOR_THEMES.find(t => t.id === 'red') ?? COLOR_THEMES[0];
 
 const getThemeStyle = (colorId) => {
   const theme = COLOR_THEMES.find(t => t.id === colorId) ?? DEFAULT_THEME;
@@ -155,7 +158,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(getKSTDateString());
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedColor, setSelectedColor] = useState('green');
+  const [selectedColor, setSelectedColor] = useState('red');
   const [attachment, setAttachment] = useState(null);
   
   const [modalMode, setModalMode] = useState('none'); // 'none', 'detail', 'form'
@@ -460,7 +463,7 @@ export default function App() {
       setSelectedDate(dateStr);
       setTitle('');
       setDescription('');
-      setSelectedColor('green'); 
+      setSelectedColor('red'); 
       setAttachment(null);
       setModalMode('form');
     });
@@ -472,7 +475,7 @@ export default function App() {
     setSelectedDate(plan.date);
     setTitle(plan.title);
     setDescription(plan.description || '');
-    setSelectedColor(plan.color || 'green');
+    setSelectedColor(plan.color || 'red');
     setAttachment(plan.attachment || null);
     setModalMode('detail');
   }, []);
@@ -699,7 +702,7 @@ export default function App() {
                       style={getThemeStyle(selectedColor)} 
                       className="px-3 py-1 rounded-md text-sm font-bold shadow-sm"
                     >
-                      {COLOR_THEMES.find(t => t.id === selectedColor)?.label || '기본'}
+                      {COLOR_THEMES.find(t => t.id === selectedColor)?.label || '미래교무부'}
                     </span>
                   </div>
                   <h4 className="text-4xl font-extrabold text-slate-900">{title}</h4>
@@ -776,8 +779,8 @@ export default function App() {
 
                 <form onSubmit={handleSavePlan} className="p-8 space-y-8">
                   <div>
-                    <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">일정 분류 (색상)</label>
-                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                    <label className="text-lg font-bold text-slate-500 uppercase mb-4 block tracking-widest">부서 분류 (색상)</label>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {COLOR_THEMES.map(theme => (
                         <button
                           key={theme.id}
